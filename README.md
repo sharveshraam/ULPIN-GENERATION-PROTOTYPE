@@ -21,6 +21,34 @@ Unit     20 digits   parcel + [Floor 3][Unit 3]
 
 Example: `32070410180902` → floor 12 → `32070410180902012` → unit 4 → `32070410180902012004`
 
+### Human-readable format
+
+An alternative hyphenated presentation is also supported:
+
+```
+{Country}-{State}-{District}-{City}-{Plot}-{Unit}
+IND-TN-001-CHE-F03-U301
+```
+
+| Part | Rule | Example |
+|---|---|---|
+| Country | 3 uppercase letters | `IND` |
+| State | 2 uppercase letters | `TN` |
+| District | 3 digits | `001` |
+| City | 3 uppercase letters | `CHE` |
+| Plot | letter + 2 digits | `F03` |
+| Unit | `U` + 3 digits | `U301` |
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/generate-custom-ulpin \
+  -H 'Content-Type: application/json' \
+  -d '{"country":"IND","state_code":"TN","district_code":"001","city_code":"CHE","plot_code":"F03","unit_code":"U301"}'
+# {"ulpin":"IND-TN-001-CHE-F03-U301"}
+```
+
+The numeric 14-digit ULPIN remains the canonical identifier; ULPIN columns are
+`String(50)` so both forms fit.
+
 ---
 
 ## Quick start
@@ -77,6 +105,8 @@ cd backend && python -m pytest tests/ -q      # 34 tests
 | `GET` | `/api/v1/parcels/{ulpin}/floors` | Floor table |
 | `GET` | `/api/v1/parcels/{ulpin}/units` | Units, paginated (`limit`, `offset`, `floor`) |
 | `POST` | `/api/v1/generate-ulpin` | Build a ULPIN from admin codes |
+| `POST` | `/api/v1/generate-custom-ulpin` | Hyphenated `IND-TN-001-CHE-F03-U301` form |
+| `GET` | `/api/v1/decode-custom-ulpin/{ulpin}` | Split a hyphenated ULPIN into parts |
 | `POST` | `/api/v1/generate-ulpin/from-coordinates` | Derive codes by reverse geocoding |
 | `GET` | `/api/v1/decode-ulpin/{ulpin}` | Split a 14/17/20-digit ULPIN into parts |
 | `POST` | `/api/v1/generate-3d-model` | Floors + units + per-floor 3D geometry |
@@ -137,7 +167,7 @@ Push the repo root and enable Pages. Then link to the deployed API:
 
 ## Testing checklist
 
-- [ ] `pytest` — 34 tests pass
+- [ ] `pytest` — 61 tests pass
 - [ ] `/health` returns `{"status":"ok","database":"connected"}`
 - [ ] `/docs` renders the full endpoint list
 - [ ] Landing page: nav, scroll-reveal, API status pill

@@ -45,6 +45,37 @@ class ULPINRequest(BaseModel):
     plot_number: int = Field(1, ge=0, le=9999)
 
 
+class CustomULPINRequest(BaseModel):
+    """Hyphenated format: {Country}-{State}-{District}-{City}-{Plot}-{Unit}."""
+
+    country: str = Field("IND", description="3 uppercase letters, e.g. IND")
+    state_code: str = Field("TN", description="2 uppercase letters, e.g. TN")
+    district_code: str = Field("001", description="3 digits, e.g. 001")
+    city_code: str = Field("CHE", description="3 uppercase letters, e.g. CHE")
+    plot_code: str = Field("F03", description="Letter + 2 digits, e.g. F03")
+    unit_code: str = Field("U301", description="'U' + 3 digits, e.g. U301")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "country": "IND", "state_code": "TN", "district_code": "001",
+                "city_code": "CHE", "plot_code": "F03", "unit_code": "U301",
+            }
+        }
+    )
+
+    @field_validator("country", "state_code", "city_code", "plot_code", "unit_code")
+    @classmethod
+    def _upper(cls, v: str) -> str:
+        # Accept lowercase input rather than rejecting it outright.
+        return str(v).strip().upper()
+
+    @field_validator("district_code")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return str(v).strip()
+
+
 class ULPINFromCoordsRequest(BaseModel):
     latitude: float = Field(..., ge=-90, le=90)
     longitude: float = Field(..., ge=-180, le=180)

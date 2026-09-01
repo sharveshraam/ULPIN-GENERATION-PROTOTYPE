@@ -121,6 +121,85 @@ def parse_unit_ulpin(value: str) -> dict:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Human-readable hyphenated format
+#
+#   {Country}-{State}-{District}-{City}-{Plot}-{Unit}
+#   e.g. IND-TN-001-CHE-F03-U301
+#
+# This is an alternative presentation format. The numeric 14-digit ULPIN above
+# remains the canonical identifier used for storage and lookups.
+# --------------------------------------------------------------------------- #
+CUSTOM_ULPIN_PATTERNS = {
+    "country": re.compile(r"^[A-Z]{3}$"),
+    "state_code": re.compile(r"^[A-Z]{2}$"),
+    "district_code": re.compile(r"^[0-9]{3}$"),
+    "city_code": re.compile(r"^[A-Z]{3}$"),
+    "plot_code": re.compile(r"^[A-Z][0-9]{2}$"),
+    "unit_code": re.compile(r"^U[0-9]{3}$"),
+}
+
+_CUSTOM_HINTS = {
+    "country": "3 uppercase letters, e.g. IND",
+    "state_code": "2 uppercase letters, e.g. TN",
+    "district_code": "3 digits, e.g. 001",
+    "city_code": "3 uppercase letters, e.g. CHE",
+    "plot_code": "one uppercase letter then 2 digits, e.g. F03",
+    "unit_code": "'U' then 3 digits, e.g. U301",
+}
+
+CUSTOM_ULPIN_RE = re.compile(
+    r"^[A-Z]{3}-[A-Z]{2}-[0-9]{3}-[A-Z]{3}-[A-Z][0-9]{2}-U[0-9]{3}$"
+)
+
+
+def validate_custom_ulpin_parts(**parts: str) -> None:
+    """Raise ValueError listing every malformed component."""
+    errors = []
+    for field, value in parts.items():
+        pattern = CUSTOM_ULPIN_PATTERNS.get(field)
+        if pattern and not pattern.match(str(value)):
+            errors.append(f"{field}={value!r} must be {_CUSTOM_HINTS[field]}")
+    if errors:
+        raise ValueError("; ".join(errors))
+
+
+def generate_custom_ulpin(
+    country: str = "IND",
+    state_code: str = "TN",
+    district_code: str = "001",
+    city_code: str = "CHE",
+    plot_code: str = "F03",
+    unit_code: str = "U301",
+    validate: bool = True,
+) -> str:
+    """Build a hyphenated ULPIN such as ``IND-TN-001-CHE-F03-U301``.
+
+    Components are validated by default; pass ``validate=False`` to skip.
+    """
+    if validate:
+        validate_custom_ulpin_parts(
+            country=country, state_code=state_code, district_code=district_code,
+            city_code=city_code, plot_code=plot_code, unit_code=unit_code,
+        )
+    return f"{country}-{state_code}-{district_code}-{city_code}-{plot_code}-{unit_code}"
+
+
+def parse_custom_ulpin(value: str) -> dict:
+    """Split a hyphenated ULPIN back into its six components."""
+    v = str(value).strip()
+    if not CUSTOM_ULPIN_RE.match(v):
+        raise ValueError(
+            f"{v!r} is not a valid custom ULPIN (expected COUNTRY-ST-000-CTY-A00-U000)"
+        )
+    country, state, district, city, plot, unit = v.split("-")
+    return {
+        "country": country, "state_code": state, "district_code": district,
+        "city_code": city, "plot_code": plot, "unit_code": unit,
+        "floor_number": int(plot[1:]), "unit_number": int(unit[1:]),
+    }
+
+
 def next_plot_number(
     db: Session,
     state_code: str,

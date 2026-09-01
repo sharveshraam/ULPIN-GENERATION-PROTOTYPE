@@ -388,3 +388,115 @@ def test_subdivision_handles_concave_shape():
         [0.0002, 0.0004], [0, 0.0004], [0, 0]]]}
     parts = subdivide_polygon(l_shape, 8)
     assert 1 <= len(parts) <= 8
+
+
+# --------------------------------------------------------------------------- #
+# Custom hyphenated ULPIN: {Country}-{State}-{District}-{City}-{Plot}-{Unit}
+# --------------------------------------------------------------------------- #
+def test_custom_ulpin_exact_expected_output():
+    """The specified example must produce exactly IND-TN-001-CHE-F03-U301."""
+    assert ug.generate_custom_ulpin(
+        country="IND", state_code="TN", district_code="001",
+        city_code="CHE", plot_code="F03", unit_code="U301",
+    ) == "IND-TN-001-CHE-F03-U301"
+
+
+def test_custom_ulpin_defaults_match_example():
+    assert ug.generate_custom_ulpin() == "IND-TN-001-CHE-F03-U301"
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("country", "IN"), ("country", "ind"), ("country", "INDIA"),
+    ("state_code", "T"), ("state_code", "tn"), ("state_code", "TNX"),
+    ("district_code", "01"), ("district_code", "ABC"), ("district_code", "0001"),
+    ("city_code", "CH"), ("city_code", "che"),
+    ("plot_code", "F3"), ("plot_code", "03F"), ("plot_code", "f03"),
+    ("unit_code", "U30"), ("unit_code", "X301"), ("unit_code", "u301"),
+])
+def test_custom_ulpin_rejects_malformed_parts(field, bad):
+    kwargs = {
+        "country": "IND", "state_code": "TN", "district_code": "001",
+        "city_code": "CHE", "plot_code": "F03", "unit_code": "U301",
+    }
+    kwargs[field] = bad
+    with pytest.raises(ValueError):
+        ug.generate_custom_ulpin(**kwargs)
+
+
+def test_custom_ulpin_validation_can_be_skipped():
+    assert ug.generate_custom_ulpin(country="xx", validate=False).startswith("xx-")
+
+
+def test_custom_ulpin_roundtrip():
+    parts = ug.parse_custom_ulpin("IND-TN-001-CHE-F03-U301")
+    assert parts["city_code"] == "CHE"
+    assert parts["floor_number"] == 3 and parts["unit_number"] == 301
+    assert ug.generate_custom_ulpin(**{
+        k: parts[k] for k in
+        ("country", "state_code", "district_code", "city_code", "plot_code", "unit_code")
+    }) == "IND-TN-001-CHE-F03-U301"
+
+
+def test_custom_ulpin_endpoint_returns_exact_shape():
+    r = client.post("/api/v1/generate-custom-ulpin", json={
+        "country": "IND", "state_code": "TN", "district_code": "001",
+        "city_code": "CHE", "plot_code": "F03", "unit_code": "U301",
+    })
+    assert r.status_code == 200
+    # Response must be exactly {"ulpin": "..."} as specified.
+    assert r.json() == {"ulpin": "IND-TN-001-CHE-F03-U301"}
+
+
+def test_custom_ulpin_endpoint_normalises_lowercase():
+    r = client.post("/api/v1/generate-custom-ulpin", json={
+        "country": "ind", "state_code": "tn", "district_code": "001",
+        "city_code": "che", "plot_code": "f03", "unit_code": "u301",
+    })
+    assert r.json() == {"ulpin": "IND-TN-001-CHE-F03-U301"}
+
+
+def test_custom_ulpin_endpoint_bad_input_is_400_not_500():
+    r = client.post("/api/v1/generate-custom-ulpin", json={
+        "country": "INDIA", "state_code": "TN", "district_code": "001",
+        "city_code": "CHE", "plot_code": "F03", "unit_code": "U301",
+    })
+    assert r.status_code == 400
+    assert "country" in r.json()["message"]
+
+
+def test_decode_custom_ulpin_endpoint():
+    r = client.get("/api/v1/decode-custom-ulpin/IND-TN-001-CHE-F03-U301")
+    assert r.status_code == 200
+    assert r.json()["data"]["state_code"] == "TN"
+
+
+def test_legacy_numeric_generator_untouched():
+    """The original 14-digit generator must keep working unchanged."""
+    assert ug.generate_ulpin_code("32", "07", "041", "018", 902) == "32070410180902"
+    assert len(ug.generate_ulpin_code("09", "12", "105", "055", 41)) == 14
+
+
+def test_long_ulpin_persists_in_widened_column():
+    """String(50) must accept a hyphenated ULPIN end to end."""
+    from app.database import ParcelModel, SessionLocal
+
+    custom = ug.generate_custom_ulpin(plot_code="A01", unit_code="U999")
+    db = SessionLocal()
+    try:
+        row = ParcelModel(
+            ulpin=custom, name="Widened column test", building_type="residential",
+            state_code="33", district_code="01", sub_district_code="001",
+            village_code="001", plot_number=4321,
+            centroid_lat=13.08, centroid_lon=80.27,
+            area_sq_m=500.0, height_m=10.5, total_floors=3, total_units=5,
+            geometry_json={}, properties_json={},
+        )
+        db.add(row)
+        db.commit()
+        stored = db.query(ParcelModel).filter(ParcelModel.ulpin == custom).one()
+        assert stored.ulpin == "IND-TN-001-CHE-A01-U999"
+        assert len(stored.ulpin) > 14
+        db.delete(stored)
+        db.commit()
+    finally:
+        db.close()

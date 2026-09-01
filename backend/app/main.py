@@ -25,6 +25,7 @@ from .schemas import (
     APIResponse,
     BBoxGenerateRequest,
     BulkGenerateRequest,
+    CustomULPINRequest,
     HealthResponse,
     Model3DRequest,
     ParcelCreate,
@@ -153,6 +154,28 @@ async def generate_ulpin(payload: ULPINRequest):
         payload.sub_district_code, payload.village_code, payload.plot_number,
     )
     return {"success": True, "data": {"ulpin": ulpin, "parts": ug.parse_unit_ulpin(ulpin)}}
+
+
+@app.post("/api/v1/generate-custom-ulpin", tags=["ulpin"])
+async def generate_custom_ulpin(payload: CustomULPINRequest):
+    """Hyphenated ULPIN: ``{Country}-{State}-{District}-{City}-{Plot}-{Unit}``.
+
+    Example: ``IND-TN-001-CHE-F03-U301``
+    """
+    ulpin = ug.generate_custom_ulpin(
+        country=payload.country,
+        state_code=payload.state_code,
+        district_code=payload.district_code,
+        city_code=payload.city_code,
+        plot_code=payload.plot_code,
+        unit_code=payload.unit_code,
+    )
+    return {"ulpin": ulpin}
+
+
+@app.get("/api/v1/decode-custom-ulpin/{ulpin}", tags=["ulpin"])
+async def decode_custom_ulpin(ulpin: str):
+    return {"success": True, "data": ug.parse_custom_ulpin(ulpin)}
 
 
 @app.post("/api/v1/generate-ulpin/from-coordinates", tags=["ulpin"])

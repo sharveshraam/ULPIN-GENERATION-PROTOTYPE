@@ -59,7 +59,9 @@ class ParcelModel(Base):
     __tablename__ = "parcels"
 
     id = Column(Integer, primary_key=True, index=True)
-    ulpin = Column(String(14), unique=True, index=True, nullable=False)
+    # 50 chars accommodates both the 14-digit numeric ULPIN and the longer
+    # hyphenated form (e.g. IND-TN-001-CHE-F03-U301).
+    ulpin = Column(String(50), unique=True, index=True, nullable=False)
 
     name = Column(String(255), default="Unnamed Building")
     building_type = Column(String(64), default="residential", index=True)
@@ -112,8 +114,8 @@ class FloorModel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     parcel_id = Column(Integer, ForeignKey("parcels.id", ondelete="CASCADE"), index=True)
-    parent_ulpin = Column(String(14), index=True, nullable=False)
-    floor_ulpin = Column(String(17), unique=True, index=True, nullable=False)
+    parent_ulpin = Column(String(50), index=True, nullable=False)
+    floor_ulpin = Column(String(50), unique=True, index=True, nullable=False)
 
     floor_number = Column(Integer, nullable=False)
     floor_height_m = Column(Float, nullable=False)
@@ -142,8 +144,8 @@ class UnitModel(Base):
     parcel_id = Column(Integer, ForeignKey("parcels.id", ondelete="CASCADE"), index=True)
     floor_id = Column(Integer, ForeignKey("floors.id", ondelete="CASCADE"), index=True)
 
-    parent_ulpin = Column(String(14), index=True, nullable=False)
-    unit_ulpin = Column(String(20), unique=True, index=True, nullable=False)
+    parent_ulpin = Column(String(50), index=True, nullable=False)
+    unit_ulpin = Column(String(50), unique=True, index=True, nullable=False)
 
     floor_number = Column(Integer, nullable=False, index=True)
     unit_number = Column(Integer, nullable=False)
