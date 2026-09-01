@@ -3,9 +3,10 @@
  *
  * The base URL resolves in this order:
  *   1. ?api=<url> query parameter (handy for testing against a deployed backend)
- *   2. localStorage 'ulpin_api_base'
- *   3. http://127.0.0.1:8000 when the page itself is on localhost
- *   4. '' (same origin) otherwise
+ *   2. localStorage 'ulpin_api_base' (set via the in-app "Connect API" dialog)
+ *   3. API_BASE_URL from js/config.js (the committed deployment default)
+ *   4. http://127.0.0.1:8000 when the page itself is on localhost
+ *   5. '' (same origin) otherwise
  *
  * Every call degrades gracefully: if the backend is unreachable the UI falls
  * back to client-side computation so the demo still works.
@@ -21,6 +22,9 @@ const API = (() => {
     }
     const stored = localStorage.getItem('ulpin_api_base');
     if (stored !== null) return stored.replace(/\/$/, '');
+    // Deployment default from js/config.js, if the file is present and filled in.
+    const configured = (typeof window !== 'undefined' && window.API_BASE_URL) || '';
+    if (configured) return configured.replace(/\/$/, '');
     if (['localhost', '127.0.0.1'].includes(location.hostname)) return 'http://127.0.0.1:8000';
     return '';
   }
@@ -59,6 +63,30 @@ const API = (() => {
     get base() { return BASE; },
     set base(v) { BASE = (v || '').replace(/\/$/, ''); localStorage.setItem('ulpin_api_base', BASE); },
     get isOnline() { return online; },
+
+    /** Forget a saved override and fall back to js/config.js (or localhost). */
+    clearBase() {
+      localStorage.removeItem('ulpin_api_base');
+      BASE = resolveBase();
+      return BASE;
+    },
+
+    /**
+     * Probe an arbitrary URL without committing to it, so the "Connect API"
+     * dialog can validate before saving. Returns the parsed /health body.
+     */
+    async testBase(candidate) {
+      const target = (candidate || '').replace(/\/$/, '');
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15000);
+      try {
+        const res = await fetch(`${target}/health`, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    },
 
     /** Probe /health so the UI can show an accurate status pill. */
     async checkHealth() {

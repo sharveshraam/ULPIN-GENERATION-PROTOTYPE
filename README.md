@@ -203,8 +203,49 @@ SQLite on Cloud Run is wiped on every cold start.
 
 **Frontend → GitHub Pages**
 
-Push the repo root and enable Pages. Then link to the deployed API:
-`https://<user>.github.io/<repo>/map.html?api=https://ulpin-api-xxx.run.app`
+Enable Pages on the repo (Settings → Pages → deploy from the branch root), then
+tell the frontend where the backend lives. There are three ways, checked in this
+order — the first one found wins:
+
+1. **Query parameter** — good for a quick test, nothing to commit:
+   `https://<user>.github.io/<repo>/map.html?api=https://ulpin-api.onrender.com`
+   The value is remembered afterwards.
+
+2. **The "Connect API" dialog** — click the status pill in the header, paste the
+   URL, press *Test & save*. It calls `/health` first and reports a clear error
+   if the service is asleep, the URL is wrong, or CORS is blocking the origin.
+   Saved in `localStorage`, so it survives reloads but only on that browser.
+
+3. **`js/config.js`** — the permanent option, and the one to use so that *every*
+   visitor gets a working site:
+
+   ```js
+   const API_BASE_URL = 'https://ulpin-api.onrender.com';   // no trailing slash
+   ```
+
+   Commit it and Pages picks it up on the next deploy.
+
+Whichever you choose, the backend must allow the Pages origin. On Render set:
+
+```
+ALLOWED_ORIGINS = https://<user>.github.io
+```
+
+(no path, no trailing slash), or `*` for an open demo. If it is left unset while
+the frontend is on a different domain, every request fails CORS and the app
+silently drops into browser mode.
+
+Two gotchas worth knowing:
+
+- **Mixed content.** A Pages site is https, so the API must be https too. A
+  `http://` API URL is blocked by the browser. Render gives you https, so just
+  don't hand-edit it back to http.
+- **Free-tier cold starts.** Render sleeps idle services; the first request can
+  take ~50 seconds and may look like a failure. Retry once before assuming the
+  wiring is wrong — the status pill will flip to "API live" when it wakes.
+
+If the backend is unreachable the app still works: it computes floors and units
+client-side and shows "Browser mode" in the header.
 
 ---
 

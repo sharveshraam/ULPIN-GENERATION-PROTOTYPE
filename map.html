@@ -246,8 +246,10 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
     <!-- App modules -->
+    <script src="js/config.js"></script>
     <script src="js/api.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/api-connect.js"></script>
     <script src="js/3d-viewer.js"></script>
     <script src="js/details.js"></script>
     <script src="js/map.js"></script>
@@ -311,6 +313,7 @@
 
         (async () => {
             const pill = document.getElementById('apiPill');
+            ApiConnect.attach();   // clicking the pill opens the connect dialog
             const health = await API.checkHealth();
             if (health) {
                 pill.className = 'hidden md:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-live';
@@ -318,8 +321,8 @@
             } else {
                 pill.className = 'hidden md:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-off';
                 pill.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-current"></span> Browser mode';
-                pill.title = 'Backend unreachable — floors and units are computed in the browser.';
-                UI.toast('Backend offline — running in browser mode. Everything still works.', 'info', 5500);
+                pill.title = 'Backend unreachable — click to connect to your deployed API.';
+                UI.toast('Backend offline — running in browser mode. Click the status pill to connect your API.', 'info', 6500);
             }
         })();
     </script>

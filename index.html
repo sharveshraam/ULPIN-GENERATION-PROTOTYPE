@@ -390,8 +390,10 @@
 
     <div id="toasts" class="fixed top-20 left-1/2 -translate-x-1/2 z-[80] space-y-2 w-[min(92vw,430px)]"></div>
 
+    <script src="js/config.js"></script>
     <script src="js/api.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/api-connect.js"></script>
     <script>
         UI.initScrollReveal();
 
@@ -399,6 +401,7 @@
         // about whether results come from the server or the browser.
         (async () => {
             const pill = document.getElementById('apiPill');
+            ApiConnect.attach();   // clicking the pill opens the connect dialog
             const health = await API.checkHealth();
             if (health) {
                 pill.className = 'hidden sm:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-live';
@@ -406,7 +409,7 @@
             } else {
                 pill.className = 'hidden sm:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-off';
                 pill.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-current"></span> Browser mode';
-                pill.title = 'Backend not reachable — the app computes everything client-side.';
+                pill.title = 'Backend not reachable — click to connect to your deployed API.';
             }
         })();
     </script>
