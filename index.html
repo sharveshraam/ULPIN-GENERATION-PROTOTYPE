@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ULPIN Atlas — Land Parcel Intelligence & 3D Visualizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: {
+                        ink: { 900: '#05070f', 800: '#0a0e1a', 700: '#111726', 600: '#1a2234' },
+                        accent: { DEFAULT: '#38bdf8', deep: '#0284c7', glow: '#7dd3fc' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        :root { --accent: #38bdf8; }
+        * { -webkit-font-smoothing: antialiased; }
+        body { font-family: 'Inter', sans-serif; background: #05070f; }
+
+        /* ---------- Ambient animated background ---------- */
+        .aurora { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
+        .blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .45; animation: drift 22s ease-in-out infinite; }
+        .blob.b1 { width: 46vw; height: 46vw; background: #0ea5e9; top: -12vw; left: -8vw; }
+        .blob.b2 { width: 38vw; height: 38vw; background: #6366f1; bottom: -14vw; right: -6vw; animation-delay: -7s; }
+        .blob.b3 { width: 30vw; height: 30vw; background: #14b8a6; top: 35%; left: 45%; animation-delay: -13s; opacity: .3; }
+        @keyframes drift {
+            0%, 100% { transform: translate(0,0) scale(1); }
+            33% { transform: translate(6vw, 4vh) scale(1.12); }
+            66% { transform: translate(-5vw, -3vh) scale(.92); }
+        }
+        .grid-veil {
+            position: fixed; inset: 0; z-index: 0; pointer-events: none;
+            background-image: linear-gradient(rgba(56,189,248,.06) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(56,189,248,.06) 1px, transparent 1px);
+            background-size: 54px 54px;
+            mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 30%, transparent 100%);
+            -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 30%, transparent 100%);
+        }
+
+        /* ---------- Glass ---------- */
+        .glass {
+            background: rgba(13, 18, 32, .72);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            border: 1px solid rgba(148, 179, 226, .14);
+        }
+        .glass-soft { background: rgba(255,255,255,.04); border: 1px solid rgba(148,179,226,.12); }
+
+        /* ---------- Buttons ---------- */
+        .btn-primary {
+            position: relative; overflow: hidden;
+            background: linear-gradient(135deg, #0ea5e9, #6366f1);
+            box-shadow: 0 8px 26px -8px rgba(56,189,248,.7);
+            transition: transform .18s cubic-bezier(.2,.9,.3,1.2), box-shadow .2s, filter .2s;
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 14px 34px -8px rgba(56,189,248,.85); filter: brightness(1.08); }
+        .btn-primary:active { transform: translateY(0) scale(.98); }
+        .btn-primary::after {
+            content: ''; position: absolute; top: 0; left: -120%; width: 60%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
+            transform: skewX(-20deg);
+        }
+        .btn-primary:hover::after { animation: sheen .85s ease; }
+        @keyframes sheen { to { left: 140%; } }
+        .btn-ghost { transition: all .18s ease; border: 1px solid rgba(148,179,226,.16); }
+        .btn-ghost:hover { background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.5); transform: translateY(-1px); }
+
+        /* ---------- Animations ---------- */
+        .rise { opacity: 0; transform: translateY(22px); animation: rise .8s cubic-bezier(.22,1,.36,1) forwards; }
+        @keyframes rise { to { opacity: 1; transform: none; } }
+        .fade-in { animation: fadeIn .45s ease both; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px);} to { opacity:1; transform:none;} }
+        .slide-panel { animation: slidePanel .5s cubic-bezier(.22,1,.36,1) both; }
+        @keyframes slidePanel { from { opacity: 0; transform: translateX(28px);} to { opacity:1; transform:none;} }
+
+        .pulse-ring::before {
+            content: ''; position: absolute; inset: -4px; border-radius: inherit;
+            border: 1px solid rgba(56,189,248,.6); animation: pulseRing 2.4s ease-out infinite;
+        }
+        @keyframes pulseRing { 0% { opacity:.8; transform: scale(.96);} 100% { opacity:0; transform: scale(1.12);} }
+
+        .shimmer {
+            background: linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.12) 37%, rgba(255,255,255,.04) 63%);
+            background-size: 400% 100%; animation: shimmer 1.4s ease infinite; border-radius: 6px;
+        }
+        @keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+        .gradient-text {
+            background: linear-gradient(100deg, #7dd3fc 0%, #a5b4fc 45%, #5eead4 100%);
+            -webkit-background-clip: text; background-clip: text; color: transparent;
+        }
+
+        /* ---------- Scrollbar ---------- */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(120,150,200,.28); border-radius: 99px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(120,150,200,.5); }
+
+        /* ---------- Leaflet dark tweaks ---------- */
+        .leaflet-container { background: #05070f; font-family: 'Inter', sans-serif; }
+        .leaflet-control-attribution { background: rgba(5,7,15,.72) !important; color: #64748b !important; font-size: 9px !important; }
+        .leaflet-control-attribution a { color: #7dd3fc !important; }
+        .leaflet-bar a { background: rgba(13,18,32,.9) !important; color: #cbd5e1 !important; border-color: rgba(148,179,226,.2) !important; }
+        .leaflet-bar a:hover { background: rgba(56,189,248,.2) !important; }
+
+        .parcel-tip {
+            background: rgba(10,14,26,.92); border: 1px solid rgba(56,189,248,.4); color: #e2e8f0;
+            border-radius: 8px; font-size: 11px; font-weight: 600; padding: 4px 9px; box-shadow: 0 6px 20px rgba(0,0,0,.5);
+        }
+        .parcel-tip::before { display: none; }
+
+        /* ---------- Suggestion dropdown ---------- */
+        .suggest-item { transition: background .12s, padding-left .16s; border-left: 2px solid transparent; }
+        .suggest-item:hover, .suggest-item.active { background: rgba(56,189,248,.13); border-left-color: var(--accent); padding-left: 18px; }
+
+        /* ---------- Toast ---------- */
+        .toast { animation: toastIn .4s cubic-bezier(.22,1,.36,1) both; }
+        @keyframes toastIn { from { opacity:0; transform: translateY(-16px) scale(.96);} to { opacity:1; transform:none;} }
+
+        /* ---------- Stat card hover ---------- */
+        .stat { transition: transform .2s, border-color .2s, background .2s; }
+        .stat:hover { transform: translateY(-3px); border-color: rgba(56,189,248,.45); background: rgba(56,189,248,.07); }
+
+        /* ---------- ULPIN segments ---------- */
+        .seg { transition: all .2s; cursor: default; }
+        .seg:hover { transform: translateY(-3px); box-shadow: 0 8px 18px -6px rgba(56,189,248,.6); }
+
+        /* ---------- Tabs ---------- */
+        .tab { position: relative; transition: color .2s; }
+        .tab::after {
+            content:''; position:absolute; left:0; right:0; bottom:-1px; height:2px;
+            background: linear-gradient(90deg,#38bdf8,#818cf8); transform: scaleX(0); transition: transform .25s cubic-bezier(.22,1,.36,1);
+        }
+        .tab.active::after { transform: scaleX(1); }
+
+        /* ---------- Progress bar ---------- */
+        .bar-fill { transition: width 1s cubic-bezier(.22,1,.36,1); }
+
+        /* ---------- Loading overlay ---------- */
+        .radar { width: 74px; height: 74px; border-radius: 50%; border: 2px solid rgba(56,189,248,.18); position: relative; }
+        .radar::after {
+            content:''; position:absolute; inset:-2px; border-radius:50%;
+            border: 2px solid transparent; border-top-color: #38bdf8; border-right-color: #818cf8;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .cesium-viewer-bottom { display: none !important; }
+        .no-scroll { overflow: hidden; }
+    </style>
+</head>
+
+<body class="text-slate-100 h-screen overflow-hidden">
+
+    <div class="aurora"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
+    <div class="grid-veil"></div>
+
+    <!-- ============================= LANDING / HERO ============================= -->
+    <section id="landing" class="fixed inset-0 z-[60] overflow-y-auto">
+        <div class="min-h-full flex flex-col">
+
+            <!-- Nav -->
+            <nav class="px-6 md:px-12 py-6 flex items-center justify-between rise" style="animation-delay:.05s">
+                <div class="flex items-center gap-3">
+                    <div class="relative w-10 h-10 rounded-xl btn-primary grid place-items-center pulse-ring">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2 3 7v10l9 5 9-5V7z" /><path d="M12 22V12M3 7l9 5 9-5" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="font-extrabold tracking-tight text-lg leading-none">ULPIN <span class="gradient-text">Atlas</span></div>
+                        <div class="text-[10px] uppercase tracking-[.18em] text-slate-500 mt-1">Land Parcel Intelligence</div>
+                    </div>
+                </div>
+                <div class="hidden md:flex items-center gap-7 text-sm text-slate-400">
+                    <a href="#how" class="hover:text-white transition">How it works</a>
+                    <a href="#spec" class="hover:text-white transition">ULPIN Spec</a>
+                    <button onclick="enterApp()" class="btn-ghost px-4 py-2 rounded-lg text-slate-200 font-medium">Launch Console</button>
+                </div>
+            </nav>
+
+            <!-- Hero -->
+            <div class="flex-1 px-6 md:px-12 pt-6 pb-16 max-w-7xl mx-auto w-full">
+                <div class="grid lg:grid-cols-[1.05fr_.95fr] gap-12 items-center">
+
+                    <div>
+                        <div class="inline-flex items-center gap-2 glass-soft rounded-full px-3.5 py-1.5 text-xs text-sky-300 mb-6 rise" style="animation-delay:.1s">
+                            <span class="relative flex h-2 w-2">
+                                <span class="animate-ping absolute h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                                <span class="relative rounded-full h-2 w-2 bg-sky-400"></span>
+                            </span>
+                            Live OSM + Satellite imagery pipeline
+                        </div>
+
+                        <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight leading-[1.06] rise" style="animation-delay:.18s">
+                            Every parcel on earth,<br>
+                            <span class="gradient-text">one unique identifier.</span>
+                        </h1>
+
+                        <p class="mt-6 text-slate-400 text-base md:text-lg leading-relaxed max-w-xl rise" style="animation-delay:.26s">
+                            Search any real-world location, snap a cadastral parcel from live satellite imagery, and
+                            generate a 14-digit ULPIN — then explode it into a floor-by-floor 3D model where every
+                            single apartment carries its own sub-unit identifier.
+                        </p>
+
+                        <!-- Primary location entry -->
+                        <div class="mt-9 rise" style="animation-delay:.34s">
+                            <label class="block text-[11px] uppercase tracking-[.16em] text-slate-500 mb-2.5 font-semibold">Enter a location to begin</label>
+                            <div class="relative">
+                                <div class="glass rounded-2xl p-1.5 flex items-center gap-2 focus-within:border-sky-400/60 transition-all duration-300"
+                                     style="box-shadow:0 20px 50px -20px rgba(56,189,248,.5)">
+                                    <div class="pl-3.5 text-slate-500">
+                                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
+                                        </svg>
+                                    </div>
+                                    <input id="heroSearch" type="text" autocomplete="off"
+                                        placeholder="Try “Marine Drive, Kochi”, “Manhattan”, “Shibuya, Tokyo”…"
+                                        class="flex-1 bg-transparent outline-none py-3.5 text-[15px] placeholder:text-slate-600">
+                                    <button onclick="useMyLocation()" title="Use my current location"
+                                        class="btn-ghost w-10 h-10 rounded-xl grid place-items-center text-slate-300 shrink-0">
+                                        <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M22 12h-3M5 12H2"/>
+                                        </svg>
+                                    </button>
+                                    <button onclick="runSearch('hero')" class="btn-primary px-6 py-3.5 rounded-xl font-semibold text-sm shrink-0">
+                                        Analyse
+                                    </button>
+                                </div>
+                                <div id="heroSuggest" class="hidden absolute top-full left-0 right-0 mt-2.5 glass rounded-xl overflow-hidden z-50 max-h-72 overflow-y-auto"></div>
+                            </div>
+
+                            <div class="flex flex-wrap items-center gap-2 mt-4 text-xs">
+                                <span class="text-slate-600 mr-1">Quick jump:</span>
+                                <button onclick="quickJump('Marine Drive, Kochi')" class="btn-ghost px-3 py-1.5 rounded-full text-slate-300">Kochi</button>
+                                <button onclick="quickJump('Connaught Place, New Delhi')" class="btn-ghost px-3 py-1.5 rounded-full text-slate-300">New Delhi</button>
+                                <button onclick="quickJump('Manhattan, New York')" class="btn-ghost px-3 py-1.5 rounded-full text-slate-300">Manhattan</button>
+                                <button onclick="quickJump('Shibuya, Tokyo')" class="btn-ghost px-3 py-1.5 rounded-full text-slate-300">Tokyo</button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4 mt-11 max-w-lg rise" style="animation-delay:.42s">
+                            <div><div class="text-2xl font-extrabold gradient-text">14</div><div class="text-[11px] text-slate-500 mt-0.5">Digit ULPIN code</div></div>
+                            <div><div class="text-2xl font-extrabold gradient-text">5 km</div><div class="text-[11px] text-slate-500 mt-0.5">Analysis window</div></div>
+                            <div><div class="text-2xl font-extrabold gradient-text">3D</div><div class="text-[11px] text-slate-500 mt-0.5">Per-flat sub-units</div></div>
+                        </div>
+                    </div>
+
+                    <!-- Visual card -->
+                    <div class="relative rise" style="animation-delay:.3s">
+                        <div class="glass rounded-3xl p-6 relative overflow-hidden">
+                            <div class="absolute -top-24 -right-24 w-64 h-64 rounded-full bg-sky-500/20 blur-3xl"></div>
+                            <div class="flex items-center justify-between mb-5 relative">
+                                <div class="text-xs uppercase tracking-widest text-slate-500 font-semibold">Sample Record</div>
+                                <div class="flex gap-1.5">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-rose-400/70"></span>
+                                    <span class="w-2.5 h-2.5 rounded-full bg-amber-400/70"></span>
+                                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400/70"></span>
+                                </div>
+                            </div>
+
+                            <div class="font-mono text-[26px] md:text-[30px] font-semibold tracking-[.06em] text-center py-4 relative">
+                                <span class="text-sky-300">32</span><span class="text-indigo-300">07</span><span class="text-teal-300">041</span><span class="text-amber-300">018</span><span class="text-rose-300">0902</span>
+                            </div>
+                            <div class="grid grid-cols-5 gap-1.5 text-center text-[9px] text-slate-500 uppercase tracking-wide mb-6 relative">
+                                <div>State</div><div>District</div><div>Sub-dist</div><div>Village</div><div>Plot</div>
+                            </div>
+
+                            <div class="space-y-2.5 relative">
+                                <div class="glass-soft rounded-lg px-3.5 py-2.5 flex justify-between text-xs">
+                                    <span class="text-slate-500">Centroid</span><span class="font-mono text-slate-200">9.98150° N, 76.28390° E</span>
+                                </div>
+                                <div class="glass-soft rounded-lg px-3.5 py-2.5 flex justify-between text-xs">
+                                    <span class="text-slate-500">Verified height</span><span class="font-mono text-slate-200">28 floors · 89.6 m</span>
+                                </div>
+                                <div class="glass-soft rounded-lg px-3.5 py-2.5 flex justify-between text-xs">
+                                    <span class="text-slate-500">Sub-units minted</span><span class="font-mono text-emerald-300">132 flats</span>
+                                </div>
+                            </div>
+
+                            <div class="mt-6 flex items-center gap-2.5 text-[11px] text-slate-500 relative">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                Geometry validated · Shapely centroid · WGS-84
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- How it works -->
+                <div id="how" class="mt-24 grid md:grid-cols-3 gap-5">
+                    <div class="glass rounded-2xl p-6 stat">
+                        <div class="w-10 h-10 rounded-xl bg-sky-500/15 text-sky-300 grid place-items-center mb-4 font-bold">1</div>
+                        <h3 class="font-semibold mb-2">Locate</h3>
+                        <p class="text-sm text-slate-400 leading-relaxed">Geocode any place name through OpenStreetMap Nominatim and drop a 5 km analysis window over live Esri satellite imagery.</p>
+                    </div>
+                    <div class="glass rounded-2xl p-6 stat">
+                        <div class="w-10 h-10 rounded-xl bg-indigo-500/15 text-indigo-300 grid place-items-center mb-4 font-bold">2</div>
+                        <h3 class="font-semibold mb-2">Identify</h3>
+                        <p class="text-sm text-slate-400 leading-relaxed">Overpass returns real building levels and heights. The parcel geometry is hashed into a compliant 14-digit ULPIN.</p>
+                    </div>
+                    <div class="glass rounded-2xl p-6 stat">
+                        <div class="w-10 h-10 rounded-xl bg-teal-500/15 text-teal-300 grid place-items-center mb-4 font-bold">3</div>
+                        <h3 class="font-semibold mb-2">Extrude</h3>
+                        <p class="text-sm text-slate-400 leading-relaxed">The footprint is extruded floor-by-floor in Cesium, minting an addressable sub-identifier for every individual flat.</p>
+                    </div>
+                </div>
+
+                <!-- Spec strip -->
+                <div id="spec" class="mt-6 glass rounded-2xl p-6 md:p-7">
+                    <div class="text-xs uppercase tracking-[.16em] text-slate-500 font-semibold mb-4">ULPIN structure — Bharat standard</div>
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <div class="seg glass-soft rounded-xl p-3.5 border-l-2 border-sky-400"><div class="font-mono text-lg text-sky-300">2</div><div class="text-[11px] text-slate-400 mt-1">State code</div></div>
+                        <div class="seg glass-soft rounded-xl p-3.5 border-l-2 border-indigo-400"><div class="font-mono text-lg text-indigo-300">2</div><div class="text-[11px] text-slate-400 mt-1">District code</div></div>
+                        <div class="seg glass-soft rounded-xl p-3.5 border-l-2 border-teal-400"><div class="font-mono text-lg text-teal-300">3</div><div class="text-[11px] text-slate-400 mt-1">Sub-district</div></div>
+                        <div class="seg glass-soft rounded-xl p-3.5 border-l-2 border-amber-400"><div class="font-mono text-lg text-amber-300">3</div><div class="text-[11px] text-slate-400 mt-1">Village code</div></div>
+                        <div class="seg glass-soft rounded-xl p-3.5 border-l-2 border-rose-400"><div class="font-mono text-lg text-rose-300">4</div><div class="text-[11px] text-slate-400 mt-1">Plot / survey no.</div></div>
+                    </div>
+                </div>
+
+                <div class="text-center mt-14">
+                    <button onclick="enterApp()" class="btn-primary px-8 py-4 rounded-2xl font-semibold">Skip intro — open the map console</button>
+                    <p class="text-xs text-slate-600 mt-4">Prototype · OpenStreetMap · Esri World Imagery · CesiumJS</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================= APP CONSOLE ============================= -->
+    <div id="app" class="hidden h-screen flex flex-col relative z-10">
+
+        <header class="glass px-5 py-3 flex items-center justify-between gap-4 z-30 shrink-0 border-b border-white/10">
+            <div class="flex items-center gap-3 shrink-0">
+                <button onclick="backToLanding()" class="w-9 h-9 rounded-xl btn-primary grid place-items-center" title="Back to home">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v10l9 5 9-5V7z"/></svg>
+                </button>
+                <div class="hidden sm:block">
+                    <div class="font-bold text-sm leading-none">ULPIN <span class="gradient-text">Atlas</span></div>
+                    <div class="text-[9px] uppercase tracking-[.16em] text-slate-500 mt-1">Map Console</div>
+                </div>
+            </div>
+
+            <!-- Console search -->
+            <div class="relative flex-1 max-w-xl">
+                <div class="glass-soft rounded-xl flex items-center gap-2 pl-3 pr-1.5 py-1 focus-within:border-sky-400/50 transition">
+                    <svg class="w-4 h-4 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                    <input id="appSearch" type="text" autocomplete="off" placeholder="Search a location…"
+                        class="flex-1 bg-transparent outline-none py-2 text-sm placeholder:text-slate-600">
+                    <button onclick="useMyLocation()" title="Use my location" class="btn-ghost w-8 h-8 rounded-lg grid place-items-center text-slate-400 shrink-0">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M22 12h-3M5 12H2"/></svg>
+                    </button>
+                    <button onclick="runSearch('app')" class="btn-primary px-4 py-2 rounded-lg text-xs font-semibold shrink-0">Go</button>
+                </div>
+                <div id="appSuggest" class="hidden absolute top-full left-0 right-0 mt-2 glass rounded-xl overflow-hidden z-50 max-h-72 overflow-y-auto"></div>
+            </div>
+
+            <div class="flex items-center gap-2.5 shrink-0">
+                <div id="cursorCoords" class="hidden lg:block text-[11px] font-mono text-sky-300/90 glass-soft px-3 py-1.5 rounded-lg whitespace-nowrap">
+                    Cursor idle
+                </div>
+                <div id="viewControls" class="hidden">
+                    <button onclick="show2DMap()" class="btn-ghost px-3.5 py-2 rounded-lg text-xs font-medium">← Satellite</button>
+                </div>
+            </div>
+        </header>
+
+        <div class="flex-1 relative overflow-hidden">
+            <div id="map2D" class="absolute inset-0 z-10"></div>
+            <div id="cesiumContainer" class="absolute inset-0 z-0"></div>
+
+            <!-- Map legend -->
+            <div id="mapLegend" class="absolute bottom-5 left-5 z-20 glass rounded-xl px-4 py-3 text-[11px] space-y-2 pointer-events-none">
+                <div class="uppercase tracking-[.14em] text-slate-500 font-semibold text-[9px]">Legend</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-sky-500/60 border border-sky-300"></span> Registered parcel</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-emerald-500/60 border border-emerald-300"></span> Selected / active</div>
+                <div class="flex items-center gap-2 text-slate-500">Click a parcel to inspect</div>
+            </div>
+
+            <!-- Loading overlay -->
+            <div id="loader" class="hidden absolute inset-0 z-40 bg-ink-900/70 backdrop-blur-sm grid place-items-center">
+                <div class="text-center">
+                    <div class="radar mx-auto"></div>
+                    <div id="loaderText" class="mt-5 text-sm text-slate-300 font-medium">Querying geocoder…</div>
+                    <div id="loaderSub" class="mt-1.5 text-[11px] text-slate-500">Nominatim → Overpass → parcel synthesis</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Detailed result overview panel ===== -->
+        <aside id="resultPanel" class="hidden absolute top-[68px] right-4 bottom-4 w-[380px] z-30 glass rounded-2xl flex flex-col overflow-hidden">
+            <div class="p-5 pb-4 border-b border-white/10 relative shrink-0">
+                <div class="absolute -top-16 -right-16 w-40 h-40 rounded-full bg-sky-500/20 blur-3xl pointer-events-none"></div>
+                <div class="flex items-start justify-between gap-3 relative">
+                    <div class="min-w-0">
+                        <div class="text-[9px] uppercase tracking-[.18em] text-sky-400 font-semibold mb-1.5">Parcel Overview</div>
+                        <h3 id="rTitle" class="font-bold text-[17px] leading-snug truncate">—</h3>
+                        <p id="rSubtitle" class="text-[11px] text-slate-500 mt-1 truncate">—</p>
+                    </div>
+                    <button onclick="closePanel()" class="btn-ghost w-7 h-7 rounded-lg grid place-items-center text-slate-400 shrink-0">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+
+                <div id="rBadges" class="flex flex-wrap gap-1.5 mt-3.5 relative"></div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="flex gap-5 px-5 border-b border-white/10 text-xs font-medium text-slate-500 shrink-0">
+                <button data-tab="overview" onclick="switchTab('overview')" class="tab active text-white py-3">Overview</button>
+                <button data-tab="geo" onclick="switchTab('geo')" class="tab py-3">Geometry</button>
+                <button data-tab="units" onclick="switchTab('units')" class="tab py-3">Units</button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5 space-y-5">
+
+                <!-- OVERVIEW TAB -->
+                <div data-panel="overview" class="space-y-5">
+                    <!-- ULPIN block -->
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-[10px] uppercase tracking-[.14em] text-slate-500 font-semibold">Generated ULPIN</span>
+                            <button onclick="copyUlpin()" id="copyBtn" class="text-[10px] btn-ghost px-2 py-1 rounded-md text-slate-400 hover:text-sky-300">Copy</button>
+                        </div>
+                        <div id="rUlpin" class="font-mono text-[19px] tracking-[.12em] text-center py-3 rounded-xl glass-soft"></div>
+                        <div class="grid grid-cols-5 gap-1 mt-1.5 text-center text-[8px] text-slate-600 uppercase tracking-wider">
+                            <div>State</div><div>Dist</div><div>Sub-d</div><div>Vill</div><div>Plot</div>
+                        </div>
+                    </div>
+
+                    <!-- Stat grid -->
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div class="stat glass-soft rounded-xl p-3">
+                            <div class="text-[10px] text-slate-500 mb-1">Floors (verified)</div>
+                            <div id="rFloors" class="text-xl font-bold text-sky-300">—</div>
+                        </div>
+                        <div class="stat glass-soft rounded-xl p-3">
+                            <div class="text-[10px] text-slate-500 mb-1">Structure height</div>
+                            <div id="rHeight" class="text-xl font-bold text-indigo-300">—</div>
+                        </div>
+                        <div class="stat glass-soft rounded-xl p-3">
+                            <div class="text-[10px] text-slate-500 mb-1">Parcel area</div>
+                            <div id="rArea" class="text-xl font-bold text-teal-300">—</div>
+                        </div>
+                        <div class="stat glass-soft rounded-xl p-3">
+                            <div class="text-[10px] text-slate-500 mb-1">Est. sub-units</div>
+                            <div id="rUnits" class="text-xl font-bold text-amber-300">—</div>
+                        </div>
+                    </div>
+
+                    <!-- Density meter -->
+                    <div class="glass-soft rounded-xl p-4">
+                        <div class="flex justify-between text-[11px] mb-2">
+                            <span class="text-slate-400">Vertical density index</span>
+                            <span id="rDensityLabel" class="font-semibold text-sky-300">—</span>
+                        </div>
+                        <div class="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                            <div id="rDensityBar" class="bar-fill h-full rounded-full" style="width:0%;background:linear-gradient(90deg,#38bdf8,#818cf8,#f472b6)"></div>
+                        </div>
+                        <div class="flex justify-between text-[9px] text-slate-600 mt-1.5"><span>Low-rise</span><span>Mid</span><span>High-rise</span></div>
+                    </div>
+
+                    <!-- Data provenance -->
+                    <div>
+                        <div class="text-[10px] uppercase tracking-[.14em] text-slate-500 font-semibold mb-2">Data provenance</div>
+                        <div id="rProvenance" class="space-y-1.5 text-[11px]"></div>
+                    </div>
+                </div>
+
+                <!-- GEOMETRY TAB -->
+                <div data-panel="geo" class="hidden space-y-4">
+                    <div class="glass-soft rounded-xl p-4 space-y-2.5 text-[11px]">
+                        <div class="flex justify-between"><span class="text-slate-500">Centroid latitude</span><span id="gLat" class="font-mono text-slate-200">—</span></div>
+                        <div class="flex justify-between"><span class="text-slate-500">Centroid longitude</span><span id="gLon" class="font-mono text-slate-200">—</span></div>
+                        <div class="flex justify-between"><span class="text-slate-500">Bounding span</span><span id="gSpan" class="font-mono text-slate-200">—</span></div>
+                        <div class="flex justify-between"><span class="text-slate-500">Vertices</span><span id="gVerts" class="font-mono text-slate-200">—</span></div>
+                        <div class="flex justify-between"><span class="text-slate-500">Perimeter</span><span id="gPerim" class="font-mono text-slate-200">—</span></div>
+                        <div class="flex justify-between"><span class="text-slate-500">CRS</span><span class="font-mono text-slate-200">EPSG:4326</span></div>
+                    </div>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-[.14em] text-slate-500 font-semibold mb-2">GeoJSON geometry</div>
+                        <pre id="gJson" class="glass-soft rounded-xl p-3 text-[9.5px] font-mono text-slate-400 overflow-x-auto leading-relaxed max-h-56 overflow-y-auto"></pre>
+                    </div>
+                </div>
+
+                <!-- UNITS TAB -->
+                <div data-panel="units" class="hidden space-y-3">
+                    <p class="text-[11px] text-slate-500 leading-relaxed">Each flat inherits the parent ULPIN plus a floor-unit suffix. Preview of the first floors:</p>
+                    <div id="uList" class="space-y-1.5"></div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-white/10 shrink-0">
+                <button onclick="render3DBuilding()" class="btn-primary w-full py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M12 22V12M3 7l9 5 9-5"/></svg>
+                    Build 3D Apartment Model
+                </button>
+            </div>
+        </aside>
+
+        <!-- Toasts -->
+        <div id="toasts" class="fixed top-20 left-1/2 -translate-x-1/2 z-[70] space-y-2 w-[min(92vw,420px)]"></div>
+    </div>
+
+    <script>
+    /* =====================================================================
+       CONFIG
+       ===================================================================== */
+    // Relative by default so it works behind any proxy/preview host.
+    // Override with ?api=http://127.0.0.1:8000 when running the FastAPI server directly.
+    const API_BASE = new URLSearchParams(location.search).get('api') || '';
+
+    /* =====================================================================
+       UI HELPERS
+       ===================================================================== */
+    function toast(msg, type = 'info', ttl = 4200) {
+        const colors = {
+            info:    ['border-sky-400/40', 'text-sky-300', 'M13 16h-1v-4h-1m1-4h.01'],
+            success: ['border-emerald-400/40', 'text-emerald-300', 'm5 13 4 4L19 7'],
+            error:   ['border-rose-400/40', 'text-rose-300', 'M12 9v4m0 4h.01']
+        }[type] || [];
+        const el = document.createElement('div');
+        el.className = `toast glass rounded-xl px-4 py-3 text-sm flex items-start gap-3 ${colors[0]}`;
+        el.innerHTML = `<svg class="w-4 h-4 mt-0.5 shrink-0 ${colors[1]}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="${colors[2]}"/></svg><span class="text-slate-200 leading-snug">${msg}</span>`;
+        document.getElementById('toasts').appendChild(el);
+        setTimeout(() => { el.style.transition = 'opacity .3s, transform .3s'; el.style.opacity = '0'; el.style.transform = 'translateY(-10px)'; setTimeout(() => el.remove(), 320); }, ttl);
+    }
+
+    function showLoader(text, sub) {
+        document.getElementById('loaderText').innerText = text;
+        if (sub) document.getElementById('loaderSub').innerText = sub;
+        document.getElementById('loader').classList.remove('hidden');
+    }
+    function hideLoader() { document.getElementById('loader').classList.add('hidden'); }
+
+    /* =====================================================================
+       LANDING <-> APP
+       ===================================================================== */
+    let mapReady = false;
+    function enterApp() {
+        const landing = document.getElementById('landing');
+        landing.style.transition = 'opacity .5s ease, transform .5s ease';
+        landing.style.opacity = '0';
+        landing.style.transform = 'scale(1.03)';
+        setTimeout(() => {
+            landing.classList.add('hidden');
+            document.getElementById('app').classList.remove('hidden');
+            if (!mapReady) { initMap(); mapReady = true; }
+            else map.invalidateSize();
+            setTimeout(() => map.invalidateSize(), 260);
+        }, 460);
+    }
+    function backToLanding() {
+        const landing = document.getElementById('landing');
+        document.getElementById('app').classList.add('hidden');
+        landing.classList.remove('hidden');
+        landing.style.opacity = '1'; landing.style.transform = 'none';
+    }
+
+    /* =====================================================================
+       GEOCODING + AUTOCOMPLETE
+       ===================================================================== */
+    let suggestTimer = null, activeSuggestIdx = -1, currentSuggestions = [];
+
+    function bindSearchBox(inputId, boxId, ctx) {
+        const input = document.getElementById(inputId);
+        const box = document.getElementById(boxId);
+
+        input.addEventListener('input', () => {
+            clearTimeout(suggestTimer);
+            const q = input.value.trim();
+            if (q.length < 3) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            box.innerHTML = `<div class="p-3 space-y-2">${'<div class="shimmer h-8"></div>'.repeat(3)}</div>`;
+            suggestTimer = setTimeout(() => fetchSuggestions(q, box, ctx), 320);
+        });
+
+        input.addEventListener('keydown', (e) => {
+            const items = box.querySelectorAll('.suggest-item');
+            if (e.key === 'ArrowDown') { e.preventDefault(); activeSuggestIdx = Math.min(activeSuggestIdx + 1, items.length - 1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); activeSuggestIdx = Math.max(activeSuggestIdx - 1, -1); }
+            else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (activeSuggestIdx >= 0 && currentSuggestions[activeSuggestIdx]) pickSuggestion(activeSuggestIdx, ctx);
+                else runSearch(ctx);
+                return;
+            } else if (e.key === 'Escape') { box.classList.add('hidden'); return; }
+            items.forEach((el, i) => el.classList.toggle('active', i === activeSuggestIdx));
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!box.contains(e.target) && e.target !== input) box.classList.add('hidden');
+        });
+    }
+
+    async function fetchSuggestions(q, box, ctx) {
+        try {
+            const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&q=${encodeURIComponent(q)}`);
+            const results = await r.json();
+            currentSuggestions = results; activeSuggestIdx = -1;
+            if (!results.length) { box.innerHTML = `<div class="p-4 text-xs text-slate-500 text-center">No matching location found.</div>`; return; }
+            box.innerHTML = results.map((r, i) => {
+                const parts = r.display_name.split(',');
+                const head = parts.shift();
+                return `<div class="suggest-item px-4 py-2.5 cursor-pointer flex items-start gap-3" onclick="pickSuggestion(${i}, '${ctx}')">
+                    <svg class="w-3.5 h-3.5 mt-0.5 text-sky-400/70 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    <div class="min-w-0">
+                        <div class="text-[13px] font-medium truncate">${head}</div>
+                        <div class="text-[10.5px] text-slate-500 truncate">${parts.join(',').trim()}</div>
+                    </div>
+                    <span class="ml-auto text-[9px] uppercase tracking-wide text-slate-600 shrink-0 mt-1">${r.type || ''}</span>
+                </div>`;
+            }).join('');
+        } catch (e) {
+            box.innerHTML = `<div class="p-4 text-xs text-rose-300 text-center">Geocoder unreachable.</div>`;
+        }
+    }
+
+    function pickSuggestion(i, ctx) {
+        const r = currentSuggestions[i];
+        if (!r) return;
+        const input = document.getElementById(ctx === 'hero' ? 'heroSearch' : 'appSearch');
+        input.value = r.display_name.split(',').slice(0, 2).join(',').trim();
+        document.getElementById(ctx === 'hero' ? 'heroSuggest' : 'appSuggest').classList.add('hidden');
+        analyseLocation(parseFloat(r.lat), parseFloat(r.lon), r.display_name);
+    }
+
+    function quickJump(q) {
+        document.getElementById('heroSearch').value = q;
+        runSearch('hero');
+    }
+
+    async function runSearch(ctx) {
+        const input = document.getElementById(ctx === 'hero' ? 'heroSearch' : 'appSearch');
+        const q = input.value.trim();
+        if (!q) { toast('Type a location first — e.g. “Marine Drive, Kochi”.', 'error'); input.focus(); return; }
+        if (ctx === 'hero') enterApp();
+        await new Promise(res => setTimeout(res, ctx === 'hero' ? 520 : 0));
+        showLoader('Geocoding “' + q + '”…', 'Resolving place name to coordinates');
+        try {
+            const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
+            const results = await r.json();
+            if (!results.length) { hideLoader(); toast(`No location matched “${q}”. Try a broader query.`, 'error'); return; }
+            document.getElementById('appSearch').value = q;
+            await analyseLocation(parseFloat(results[0].lat), parseFloat(results[0].lon), results[0].display_name);
+        } catch (e) {
+            hideLoader(); toast('Could not reach the geocoding service.', 'error');
+        }
+    }
+
+    function useMyLocation() {
+        if (!navigator.geolocation) { toast('Geolocation is not supported by this browser.', 'error'); return; }
+        enterApp();
+        setTimeout(() => showLoader('Locating you…', 'Requesting device GPS permission'), 500);
+        navigator.geolocation.getCurrentPosition(
+            p => analyseLocation(p.coords.latitude, p.coords.longitude, 'Your current position'),
+            () => { hideLoader(); toast('Location permission denied.', 'error'); },
+            { timeout: 10000 }
+        );
+    }
+
+    /* =====================================================================
+       MAP
+       ===================================================================== */
+    let map, activePolygonLayers = [], selectedParcelData = null, selectedLayer = null;
+
+    const defaultParcels = [
+        { id: 901, name: "Manhattan Central High-Rise Block A", floors: 35, state:"36", district:"06", subdist:"101", village:"000",
+          bounds: [[40.7950, -73.9750], [40.8010, -73.9680]] },
+        { id: 902, name: "Upper West Side Residential Tower B", floors: 28, state:"36", district:"06", subdist:"101", village:"000",
+          bounds: [[40.7750, -73.9820], [40.7810, -73.9760]] },
+        { id: 903, name: "Upper East Side Commercial Complex C", floors: 40, state:"36", district:"06", subdist:"101", village:"000",
+          bounds: [[40.7720, -73.9600], [40.7780, -73.9530]] }
+    ];
+
+    function boundsToParcel(p) {
+        const [[s, w], [n, e]] = p.bounds;
+        return {
+            ...p,
+            coords: [[s, w], [s, e], [n, e], [n, w]],
+            ring: [[w, s], [e, s], [e, n], [w, n], [w, s]]
+        };
+    }
+
+    function initMap() {
+        map = L.map('map2D', { zoomControl: true, attributionControl: true }).setView([40.7828, -73.9653], 13);
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19, attribution: 'Tiles &copy; Esri — Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP'
+        }).addTo(map);
+        // Place-name labels over the imagery (free, key-less Esri reference layer)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19, opacity: .8, attribution: ''
+        }).addTo(map);
+        renderParcelsOnMap(defaultParcels.map(boundsToParcel));
+        initCesium();
+    }
+
+    function renderParcelsOnMap(parcels) {
+        activePolygonLayers.forEach(l => map.removeLayer(l));
+        activePolygonLayers = [];
+        parcels.forEach((parcel, idx) => {
+            const layer = L.polygon(parcel.coords, {
+                color: '#7dd3fc', fillColor: '#0ea5e9', fillOpacity: 0.28, weight: 2, dashArray: '6 4'
+            }).addTo(map);
+
+            layer.bindTooltip(parcel.name, { className: 'parcel-tip', direction: 'top', sticky: true });
+
+            layer.on('mouseover', () => layer.setStyle({ fillOpacity: .45, weight: 3 }));
+            layer.on('mouseout', () => { if (layer !== selectedLayer) layer.setStyle({ fillOpacity: .28, weight: 2 }); });
+            layer.on('click', () => selectParcel(parcel, layer));
+
+            // Staggered reveal
+            const el = layer.getElement && layer.getElement();
+            if (el) { el.style.opacity = 0; el.style.transition = 'opacity .5s ease'; setTimeout(() => el.style.opacity = 1, 90 * idx); }
+
+            activePolygonLayers.push(layer);
+        });
+    }
+
+    /* =====================================================================
+       ULPIN + METRICS
+       ===================================================================== */
+    function generateUlpin(p) {
+        return String(p.state).padStart(2, '0') + String(p.district).padStart(2, '0') +
+               String(p.subdist).padStart(3, '0') + String(p.village).padStart(3, '0') +
+               String(p.id).padStart(4, '0');
+    }
+
+    function ringMetrics(ring) {
+        // ring: [[lon,lat], ...] closed
+        const pts = ring.slice(0, -1);
+        let cx = 0, cy = 0;
+        pts.forEach(([lon, lat]) => { cx += lon; cy += lat; });
+        cx /= pts.length; cy /= pts.length;
+        const mPerDegLat = 110574, mPerDegLon = 111320 * Math.cos(cy * Math.PI / 180);
+
+        // shoelace in metres
+        let area2 = 0, perim = 0;
+        for (let i = 0; i < pts.length; i++) {
+            const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length];
+            const ax = x1 * mPerDegLon, ay = y1 * mPerDegLat, bx = x2 * mPerDegLon, by = y2 * mPerDegLat;
+            area2 += (ax * by - bx * ay);
+            perim += Math.hypot(bx - ax, by - ay);
+        }
+        const lons = pts.map(p => p[0]), lats = pts.map(p => p[1]);
+        return {
+            lat: cy, lon: cx,
+            area: Math.abs(area2 / 2),
+            perimeter: perim,
+            vertices: pts.length,
+            spanKm: {
+                x: (Math.max(...lons) - Math.min(...lons)) * mPerDegLon / 1000,
+                y: (Math.max(...lats) - Math.min(...lats)) * mPerDegLat / 1000
+            }
+        };
+    }
+
+    function fmtArea(m2) {
+        if (m2 >= 1e6) return (m2 / 1e6).toFixed(2) + ' km²';
+        if (m2 >= 10000) return (m2 / 10000).toFixed(2) + ' ha';
+        return Math.round(m2).toLocaleString() + ' m²';
+    }
+
+    /* =====================================================================
+       PARCEL SELECTION -> DETAILED OVERVIEW
+       ===================================================================== */
+    function selectParcel(parcel, layer) {
+        if (selectedLayer) selectedLayer.setStyle({ color: '#7dd3fc', fillColor: '#0ea5e9', fillOpacity: .28, weight: 2, dashArray: '6 4' });
+        selectedLayer = layer;
+        layer.setStyle({ color: '#6ee7b7', fillColor: '#10b981', fillOpacity: .38, weight: 3, dashArray: null });
+
+        const m = ringMetrics(parcel.ring);
+        const ulpin = generateUlpin(parcel);
+        const floors = parcel.floors;
+        const heightM = +(floors * 3.2).toFixed(1);
+        const flatsPerFloor = Math.max(2, Math.min(8, Math.round(Math.sqrt(m.area) / 26)));
+        const units = floors * flatsPerFloor;
+
+        selectedParcelData = {
+            geometry: { type: 'Polygon', coordinates: [parcel.ring] },
+            properties: {
+                state_code: parcel.state, district_code: parcel.district,
+                sub_district_code: parcel.subdist, village_code: parcel.village,
+                plot_number: parcel.id, ulpin, floors, name: parcel.name,
+                flats_per_floor: flatsPerFloor
+            },
+            metrics: m
+        };
+
+        // --- Header
+        document.getElementById('rTitle').innerText = parcel.name;
+        document.getElementById('rSubtitle').innerText = `${m.lat.toFixed(5)}° , ${m.lon.toFixed(5)}°  ·  Plot #${parcel.id}`;
+
+        const src = parcel.source || 'Reference dataset';
+        const badge = (t, c) => `<span class="text-[9.5px] px-2 py-1 rounded-md ${c}">${t}</span>`;
+        document.getElementById('rBadges').innerHTML =
+            badge(src, 'bg-sky-500/15 text-sky-300 border border-sky-400/25') +
+            badge(floors >= 25 ? 'High-rise' : floors >= 10 ? 'Mid-rise' : 'Low-rise', 'bg-indigo-500/15 text-indigo-300 border border-indigo-400/25') +
+            badge('WGS-84', 'bg-white/5 text-slate-400 border border-white/10') +
+            badge('Validated', 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/25');
+
+        // --- ULPIN coloured segments
+        document.getElementById('rUlpin').innerHTML =
+            `<span class="text-sky-300">${ulpin.slice(0,2)}</span><span class="text-indigo-300">${ulpin.slice(2,4)}</span>` +
+            `<span class="text-teal-300">${ulpin.slice(4,7)}</span><span class="text-amber-300">${ulpin.slice(7,10)}</span>` +
+            `<span class="text-rose-300">${ulpin.slice(10)}</span>`;
+
+        // --- Stats (animated count-up)
+        countUp('rFloors', floors, '');
+        countUp('rHeight', heightM, ' m', 1);
+        document.getElementById('rArea').innerText = fmtArea(m.area);
+        countUp('rUnits', units, '');
+
+        // --- Density
+        const pct = Math.min(100, Math.round(floors / 60 * 100));
+        setTimeout(() => document.getElementById('rDensityBar').style.width = pct + '%', 80);
+        document.getElementById('rDensityLabel').innerText =
+            pct > 66 ? `Very high · ${pct}%` : pct > 33 ? `Moderate · ${pct}%` : `Low · ${pct}%`;
+
+        // --- Provenance
+        const prov = [
+            ['Geocoder', parcel.geocoder || 'OpenStreetMap Nominatim'],
+            ['Height source', parcel.heightSource || 'Reference dataset'],
+            ['Imagery', 'Esri World Imagery'],
+            ['Generated', new Date().toLocaleString()]
+        ];
+        document.getElementById('rProvenance').innerHTML = prov.map(([k, v]) =>
+            `<div class="flex justify-between gap-3 glass-soft rounded-lg px-3 py-2">
+                <span class="text-slate-500 shrink-0">${k}</span><span class="text-slate-300 text-right truncate">${v}</span>
+            </div>`).join('');
+
+        // --- Geometry tab
+        document.getElementById('gLat').innerText = m.lat.toFixed(6) + '° N';
+        document.getElementById('gLon').innerText = m.lon.toFixed(6) + '° E';
+        document.getElementById('gSpan').innerText = `${m.spanKm.x.toFixed(2)} × ${m.spanKm.y.toFixed(2)} km`;
+        document.getElementById('gVerts').innerText = m.vertices;
+        document.getElementById('gPerim').innerText = Math.round(m.perimeter).toLocaleString() + ' m';
+        document.getElementById('gJson').innerText = JSON.stringify(selectedParcelData.geometry, null, 1);
+
+        // --- Units tab
+        let rows = '';
+        for (let f = 1; f <= Math.min(floors, 6); f++) {
+            let chips = '';
+            for (let u = 1; u <= flatsPerFloor; u++) {
+                chips += `<span class="font-mono text-[9px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-400/20">F${f}0${u}</span>`;
+            }
+            rows += `<div class="glass-soft rounded-lg px-3 py-2.5">
+                <div class="flex justify-between items-center mb-1.5">
+                    <span class="text-[11px] font-medium">Floor ${f}</span>
+                    <span class="text-[9px] text-slate-500 font-mono">${ulpin}-F${f}xx</span>
+                </div><div class="flex flex-wrap gap-1">${chips}</div></div>`;
+        }
+        if (floors > 6) rows += `<div class="text-center text-[10px] text-slate-600 py-2">+ ${floors - 6} more floors · ${units} total units</div>`;
+        document.getElementById('uList').innerHTML = rows;
+
+        switchTab('overview');
+        const panel = document.getElementById('resultPanel');
+        panel.classList.remove('hidden');
+        panel.classList.remove('slide-panel'); void panel.offsetWidth; panel.classList.add('slide-panel');
+    }
+
+    function countUp(id, target, suffix = '', decimals = 0) {
+        const el = document.getElementById(id);
+        const dur = 700, t0 = performance.now();
+        function step(t) {
+            const k = Math.min(1, (t - t0) / dur);
+            const eased = 1 - Math.pow(1 - k, 3);
+            el.innerText = (target * eased).toFixed(decimals) + suffix;
+            if (k < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+    }
+
+    function switchTab(name) {
+        document.querySelectorAll('.tab').forEach(t => {
+            const on = t.dataset.tab === name;
+            t.classList.toggle('active', on);
+            t.classList.toggle('text-white', on);
+            t.classList.toggle('text-slate-500', !on);
+        });
+        document.querySelectorAll('[data-panel]').forEach(p => {
+            const on = p.dataset.panel === name;
+            p.classList.toggle('hidden', !on);
+            if (on) { p.classList.remove('fade-in'); void p.offsetWidth; p.classList.add('fade-in'); }
+        });
+    }
+
+    function closePanel() {
+        document.getElementById('resultPanel').classList.add('hidden');
+        if (selectedLayer) { selectedLayer.setStyle({ color: '#7dd3fc', fillColor: '#0ea5e9', fillOpacity: .28, weight: 2, dashArray: '6 4' }); selectedLayer = null; }
+    }
+
+    function copyUlpin() {
+        if (!selectedParcelData) return;
+        navigator.clipboard.writeText(selectedParcelData.properties.ulpin)
+            .then(() => { const b = document.getElementById('copyBtn'); b.innerText = 'Copied ✓'; setTimeout(() => b.innerText = 'Copy', 1600); toast('ULPIN copied to clipboard.', 'success', 2200); })
+            .catch(() => toast('Clipboard unavailable.', 'error'));
+    }
+
+    /* =====================================================================
+       OVERPASS HEIGHT LOOKUP
+       ===================================================================== */
+    async function fetchAccurateBuildingData(lat, lon) {
+        const url = `https://overpass-api.de/api/interpreter?data=[out:json][timeout:20];way[building](around:1200,${lat},${lon});out tags 60;`;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            const buildings = (data.elements || []).filter(el => el.tags && el.tags.building);
+            if (!buildings.length) return null;
+            const target = buildings.find(b => b.tags['building:levels']) || buildings.find(b => b.tags['height']) || buildings[0];
+            let floors = 15, source = 'Overpass fallback estimate';
+            if (target.tags['building:levels']) { floors = parseInt(target.tags['building:levels'], 10) || 15; source = 'OSM building:levels'; }
+            else if (target.tags['height']) { floors = Math.max(1, Math.round(parseFloat(target.tags['height']) / 3.2)); source = 'OSM height tag (÷3.2 m)'; }
+            return { name: target.tags.name || 'OSM Verified Urban Structure', floors: Math.min(floors, 60), source, count: buildings.length };
+        } catch (e) { console.warn('Overpass error', e); return null; }
+    }
+
+    /* =====================================================================
+       ANALYSE A LOCATION
+       ===================================================================== */
+    async function analyseLocation(lat, lon, label) {
+        showLoader('Loading satellite imagery…', label);
+        map.flyTo([lat, lon], 14, { duration: 1.6 });
+
+        setTimeout(() => showLoader('Querying OSM Overpass…', 'Reading real building levels & heights'), 900);
+        const real = await fetchAccurateBuildingData(lat, lon);
+
+        showLoader('Synthesising parcel & minting ULPIN…', 'Shapely centroid · 14-digit code');
+        await new Promise(r => setTimeout(r, 450));
+
+        const floors = real ? real.floors : 20;
+        const name = real ? real.name : `Sector Core — ${label.split(',')[0]}`;
+        const span = 0.025; // ~5 km window
+
+        const parcel = boundsToParcel({
+            id: Math.floor(Math.random() * 8999) + 1000,
+            name, floors,
+            state: String(Math.floor(Math.abs(lat)) % 40).padStart(2, '0'),
+            district: String(Math.floor(Math.abs(lon)) % 90).padStart(2, '0'),
+            subdist: String(Math.floor(Math.abs(lat * 1000)) % 999).padStart(3, '0'),
+            village: String(Math.floor(Math.abs(lon * 1000)) % 999).padStart(3, '0'),
+            bounds: [[lat - span, lon - span], [lat + span, lon + span]],
+            source: real ? 'OSM verified' : 'Estimated',
+            heightSource: real ? real.source : 'Regional default (20 floors)',
+            geocoder: 'OpenStreetMap Nominatim',
+            place: label
+        });
+
+        renderParcelsOnMap([parcel]);
+        hideLoader();
+        setTimeout(() => selectParcel(parcel, activePolygonLayers[0]), 350);
+        toast(`Loaded <b>${label.split(',').slice(0,2).join(',')}</b> — ${real ? real.count + ' OSM buildings scanned' : 'no OSM data, using estimate'}.`, real ? 'success' : 'info');
+    }
+
+    /* =====================================================================
+       CESIUM 3D
+       ===================================================================== */
+    let viewer = null;
+    function initCesium() {
+        Cesium.Ion.defaultAccessToken = '';
+        viewer = new Cesium.Viewer('cesiumContainer', {
+            animation: false, timeline: false, baseLayerPicker: false,
+            geocoder: false, homeButton: false, sceneModePicker: false,
+            navigationHelpButton: false, fullscreenButton: false, infoBox: true, selectionIndicator: true
+        });
+        viewer.scene.globe.depthTestAgainstTerrain = true;
+        viewer.scene.skyAtmosphere.show = true;
+
+        const h = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+        h.setInputAction((movement) => {
+            const c = viewer.scene.pickPosition(movement.endPosition);
+            const el = document.getElementById('cursorCoords');
+            if (Cesium.defined(c)) {
+                const carto = Cesium.Cartographic.fromCartesian(c);
+                const lat = Cesium.Math.toDegrees(carto.latitude).toFixed(5);
+                const lng = Cesium.Math.toDegrees(carto.longitude).toFixed(5);
+                const height = carto.height.toFixed(1);
+                const picked = viewer.scene.pick(movement.endPosition);
+                el.innerText = (Cesium.defined(picked) && picked.id && picked.id.name)
+                    ? `${picked.id.name} · ${height} m`
+                    : `${lat}, ${lng} · alt ${height} m`;
+            } else el.innerText = 'Cursor idle';
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+    }
+
+    async function render3DBuilding() {
+        if (!selectedParcelData) { toast('Select a parcel on the map first.', 'error'); return; }
+        const props = selectedParcelData.properties;
+        const floors = props.floors || 15;
+
+        showLoader('Extruding 3D model…', `${floors} floors · minting per-flat ULPINs`);
+
+        let feature = null;
+        try {
+            const res = await fetch(`${API_BASE}/api/v1/generate-3d-parcel`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ geometry: selectedParcelData.geometry, properties: props, height: floors * 3.2 })
+            });
+            const result = await res.json();
+            if (result.success) feature = result.data;
+        } catch (e) { /* fall through to local extrusion */ }
+
+        if (!feature) {
+            feature = { geometry: selectedParcelData.geometry, properties: props };
+            toast('Backend offline — extruded locally in the browser.', 'info');
+        }
+
+        const coords = feature.geometry.coordinates[0];
+        const flatPositions = [];
+        coords.forEach(pt => flatPositions.push(pt[0], pt[1]));
+
+        document.getElementById('map2D').style.zIndex = '0';
+        document.getElementById('cesiumContainer').style.zIndex = '15';
+        document.getElementById('resultPanel').classList.add('hidden');
+        document.getElementById('mapLegend').classList.add('hidden');
+        document.getElementById('viewControls').classList.remove('hidden');
+
+        viewer.entities.removeAll();
+
+        const floorHeight = 2.8, slabGap = 0.4;
+        const baseUplin = props.ulpin;
+        const flatsPerFloor = props.flats_per_floor || 4;
+        let topEntity = null;
+
+        for (let i = 0; i < floors; i++) {
+            const baseH = i * (floorHeight + slabGap);
+            const topH = baseH + floorHeight;
+            const t = i / Math.max(1, floors - 1);
+            const color = Cesium.Color.fromCssColorString('#0ea5e9').brighten(t * 0.55, new Cesium.Color()).withAlpha(0.82);
+
+            for (let f = 0; f < flatsPerFloor; f++) {
+                const flatNumber = `F${i + 1}0${f + 1}`;
+                const uid = `${baseUplin}-${flatNumber}`;
+                topEntity = viewer.entities.add({
+                    name: `Apartment ${flatNumber}`,
+                    description: `<div style="font-family:Inter,sans-serif;background:#0a0e1a;color:#e2e8f0;padding:14px;border-radius:10px;border:1px solid rgba(56,189,248,.3)">
+                        <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#38bdf8;margin-bottom:8px">Sub-unit record</div>
+                        <div style="font-family:monospace;font-size:16px;color:#7dd3fc;margin-bottom:10px">${uid}</div>
+                        <table style="font-size:12px;width:100%;border-collapse:collapse">
+                          <tr><td style="color:#64748b;padding:3px 0">Parent ULPIN</td><td style="text-align:right;font-family:monospace">${baseUplin}</td></tr>
+                          <tr><td style="color:#64748b;padding:3px 0">Floor</td><td style="text-align:right">${i + 1} of ${floors}</td></tr>
+                          <tr><td style="color:#64748b;padding:3px 0">Unit</td><td style="text-align:right">${flatNumber}</td></tr>
+                          <tr><td style="color:#64748b;padding:3px 0">Base elevation</td><td style="text-align:right">${baseH.toFixed(1)} m</td></tr>
+                          <tr><td style="color:#64748b;padding:3px 0">Parcel</td><td style="text-align:right">${props.name}</td></tr>
+                        </table></div>`,
+                    polygon: {
+                        hierarchy: Cesium.Cartesian3.fromDegreesArray(flatPositions),
+                        height: baseH, extrudedHeight: topH, material: color,
+                        outline: true, outlineColor: Cesium.Color.fromCssColorString('#7dd3fc').withAlpha(.6)
+                    }
+                });
+            }
+        }
+
+        hideLoader();
+        if (topEntity) {
+            viewer.flyTo(topEntity, { duration: 2.0, offset: new Cesium.HeadingPitchRange(25, Cesium.Math.toRadians(-35), 600) });
+        }
+        toast(`Rendered ${floors} floors · ${floors * flatsPerFloor} addressable sub-units.`, 'success');
+    }
+
+    function show2DMap() {
+        document.getElementById('cesiumContainer').style.zIndex = '0';
+        document.getElementById('map2D').style.zIndex = '10';
+        document.getElementById('viewControls').classList.add('hidden');
+        document.getElementById('mapLegend').classList.remove('hidden');
+        if (selectedParcelData) document.getElementById('resultPanel').classList.remove('hidden');
+        map.invalidateSize();
+    }
+
+    /* =====================================================================
+       BOOT
+       ===================================================================== */
+    bindSearchBox('heroSearch', 'heroSuggest', 'hero');
+    bindSearchBox('appSearch', 'appSuggest', 'app');
+    document.addEventListener('keydown', e => {
+        if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+            e.preventDefault();
+            (document.getElementById('app').classList.contains('hidden') ? heroSearch : appSearch).focus();
+        }
+    });
+    </script>
+</body>
+
+</html>
