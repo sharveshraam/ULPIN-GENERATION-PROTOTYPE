@@ -69,9 +69,14 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=False if settings.cors_origins == ["*"] else True,
+    # Never combine credentials with a wildcard origin: browsers reject that
+    # pairing outright. settings.allow_credentials is False whenever "*" is set.
+    allow_credentials=settings.allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+logger.info(
+    "CORS origins=%s credentials=%s", settings.cors_origins, settings.allow_credentials
 )
 
 # --------------------------------------------------------------------------- #
@@ -525,3 +530,23 @@ async def search(
                 ]}
 
     raise HTTPException(400, "Provide one of: q, address, or lat+lon")
+
+
+# --------------------------------------------------------------------------- #
+# Entry point
+#
+# Render normally runs this via its Start Command:
+#     uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT
+#
+# This block is a fallback so `python backend/app/main.py` also works, binding
+# to 0.0.0.0 and honouring Render's $PORT.
+# --------------------------------------------------------------------------- #
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host=settings.host,          # 0.0.0.0 by default, never localhost
+        port=settings.port,          # $PORT on Render, 8000 locally
+        reload=False,
+    )

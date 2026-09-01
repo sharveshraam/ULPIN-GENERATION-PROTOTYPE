@@ -1,0 +1,30 @@
+# Render Blueprint — optional. You can equally configure these values by hand
+# in the Render dashboard; the Build/Start commands below are the canonical ones.
+#
+# Native Python runtime is used deliberately: no Docker image is required,
+# because shapely ships manylinux wheels with GEOS bundled and every other
+# dependency is pure Python or wheel-provided.
+services:
+  - type: web
+    name: ulpin-api
+    runtime: python
+    plan: free
+    # requirements.txt lives at the repo root.
+    buildCommand: "pip install -r requirements.txt"
+    # The FastAPI package is backend/app, so --app-dir points uvicorn at it.
+    # $PORT is supplied by Render; 0.0.0.0 makes the service publicly reachable.
+    startCommand: "uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # Set to your deployed frontend origin(s) once known, e.g.
+      #   https://<user>.github.io
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: LOG_LEVEL
+        value: INFO
+      # WARNING: Render's filesystem is ephemeral — SQLite data does not
+      # survive a redeploy or restart. Attach a Disk or use Postgres to persist.
+      - key: DATABASE_URL
+        value: "sqlite:///./ulpin_database.db"

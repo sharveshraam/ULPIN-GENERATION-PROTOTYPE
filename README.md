@@ -147,7 +147,50 @@ rules — verified by a parity test across six building profiles.
 
 ## Deployment
 
-**Backend → Google Cloud Run**
+**Backend → Render (native Python runtime, no Docker)**
+
+Create a new **Web Service** on Render, point it at this repo, and use:
+
+| Setting | Value |
+| --- | --- |
+| Environment | `Python 3` |
+| Root Directory | *(leave blank — use the repo root)* |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT` |
+| Health Check Path | `/health` |
+
+Two details matter:
+
+- `requirements.txt` must be at the **repo root** — that is where Render's
+  Python builder looks. The older `backend/requirements.txt` is the dev/test
+  manifest (it adds `pytest`) and is kept for local work.
+- The FastAPI package lives at `backend/app`, so `app.main:app` only resolves
+  when uvicorn is given `--app-dir backend`. Never hard-code the port; Render
+  injects `$PORT` and the service must bind `0.0.0.0`.
+
+Environment variables to set in the dashboard:
+
+| Variable | Purpose |
+| --- | --- |
+| `ALLOWED_ORIGINS` | Your frontend origin, e.g. `https://<user>.github.io`. Use `*` for an open demo. Comma-separate multiple origins. |
+| `DATABASE_URL` | Optional. Defaults to `sqlite:///./ulpin_database.db`. |
+| `LOG_LEVEL` | Optional, defaults to `INFO`. |
+| `PYTHON_VERSION` | Optional, e.g. `3.11.9`. |
+
+`render.yaml` at the repo root encodes all of the above as a Blueprint if you
+prefer infrastructure-as-code over dashboard clicks.
+
+> **SQLite is ephemeral on Render.** The free tier has no persistent disk, so
+> every redeploy, restart or instance move wipes generated parcels. That is fine
+> for a demo (the DB is rebuilt on demand), but attach a Render Disk or point
+> `DATABASE_URL` at Postgres before treating any data as durable.
+
+When `ALLOWED_ORIGINS` is `*`, the API automatically disables
+`allow_credentials`, because browsers reject a wildcard origin on credentialed
+requests. When explicit origins are set, common localhost dev ports are appended
+so local development keeps working against the deployed API.
+
+**Backend → Google Cloud Run (alternative)**
 
 ```bash
 cd backend

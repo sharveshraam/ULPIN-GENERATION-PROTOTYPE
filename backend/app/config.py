@@ -31,9 +31,36 @@ class Settings:
         self.version: str = "1.0.0"
         self.database_url: str = _env("DATABASE_URL", "sqlite:///./ulpin_database.db")
 
-        # "*" (default) allows any origin, which keeps GitHub Pages + local files working.
-        raw_origins = _env("CORS_ORIGINS", "*")
+        # Allowed browser origins. ALLOWED_ORIGINS is the canonical name;
+        # CORS_ORIGINS is still honoured for backwards compatibility.
+        # Default "*" keeps GitHub Pages, file:// and local dev working.
+        raw_origins = _env("ALLOWED_ORIGINS", _env("CORS_ORIGINS", "*"))
         self.cors_origins: list[str] = [o.strip() for o in raw_origins.split(",") if o.strip()]
+
+        # A wildcard origin and credentialed requests are mutually exclusive in
+        # the CORS spec: browsers reject "Access-Control-Allow-Origin: *" when
+        # credentials are included. Only enable credentials for explicit origins.
+        self.allow_credentials: bool = "*" not in self.cors_origins
+
+        # Convenience origins for local frontend development.
+        self.dev_origins: list[str] = [
+            o.strip() for o in _env(
+                "DEV_ORIGINS",
+                "http://localhost:3000,http://127.0.0.1:3000,"
+                "http://localhost:5500,http://127.0.0.1:5500,"
+                "http://localhost:8080,http://127.0.0.1:8080",
+            ).split(",") if o.strip()
+        ]
+        # When specific origins are configured, also permit the local dev ones
+        # so a developer's browser is not blocked against a deployed backend.
+        if "*" not in self.cors_origins:
+            for origin in self.dev_origins:
+                if origin not in self.cors_origins:
+                    self.cors_origins.append(origin)
+
+        # Render provides $PORT; bind 0.0.0.0 so the service is reachable.
+        self.host: str = _env("HOST", "0.0.0.0")
+        self.port: int = _env_int("PORT", 8000)
 
         self.overpass_urls: list[str] = [
             u.strip()
