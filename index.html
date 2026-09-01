@@ -677,11 +677,11 @@
     let map, activePolygonLayers = [], selectedParcelData = null, selectedLayer = null;
 
     const defaultParcels = [
-        { id: 901, name: "Manhattan Central High-Rise Block A", floors: 35, state:"36", district:"06", subdist:"101", village:"000",
+        { id: 901, name: "DEMO · Manhattan Central High-Rise Block A", floors: 35, state:"36", district:"06", subdist:"101", village:"000",
           bounds: [[40.7950, -73.9750], [40.8010, -73.9680]] },
-        { id: 902, name: "Upper West Side Residential Tower B", floors: 28, state:"36", district:"06", subdist:"101", village:"000",
+        { id: 902, name: "DEMO · Upper West Side Residential Tower B", floors: 28, state:"36", district:"06", subdist:"101", village:"000",
           bounds: [[40.7750, -73.9820], [40.7810, -73.9760]] },
-        { id: 903, name: "Upper East Side Commercial Complex C", floors: 40, state:"36", district:"06", subdist:"101", village:"000",
+        { id: 903, name: "DEMO · Upper East Side Commercial Complex C", floors: 40, state:"36", district:"06", subdist:"101", village:"000",
           bounds: [[40.7720, -73.9600], [40.7780, -73.9530]] }
     ];
 
@@ -804,7 +804,7 @@
         document.getElementById('rTitle').innerText = parcel.name;
         document.getElementById('rSubtitle').innerText = `${m.lat.toFixed(5)}° , ${m.lon.toFixed(5)}°  ·  Plot #${parcel.id}`;
 
-        const src = parcel.source || 'Reference dataset';
+        const src = parcel.source || 'DEMO sample — search a place for real data';
         const badge = (t, c) => `<span class="text-[9.5px] px-2 py-1 rounded-md ${c}">${t}</span>`;
         document.getElementById('rBadges').innerHTML =
             badge(src, 'bg-sky-500/15 text-sky-300 border border-sky-400/25') +
@@ -925,7 +925,11 @@
                   `relation[building](around:${radius},${lat},${lon}););out geom 80;`;
         for (const mirror of OVERPASS_MIRRORS) {
             try {
-                const res = await fetch(mirror, { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+                const res = await fetch(mirror, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'data=' + encodeURIComponent(q)
+                });
                 if (!res.ok) continue;                       // 429 / 504 -> try next mirror
                 const data = await res.json();
                 const out = [];
@@ -1047,13 +1051,23 @@
        ===================================================================== */
     let viewer = null;
     function initCesium() {
-        Cesium.Ion.defaultAccessToken = '';
+        // No Ion account: an empty token makes Cesium's DEFAULT base layer (Ion asset 2 /
+        // Bing) return 401, which renders a blank black globe. Supply our own key-less
+        // Esri imagery instead and disable every Ion-backed widget.
+        Cesium.Ion.defaultAccessToken = undefined;
         viewer = new Cesium.Viewer('cesiumContainer', {
+            baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                maximumLevel: 19,
+                credit: 'Esri World Imagery'
+            })),
             animation: false, timeline: false, baseLayerPicker: false,
             geocoder: false, homeButton: false, sceneModePicker: false,
             navigationHelpButton: false, fullscreenButton: false, infoBox: true, selectionIndicator: true
         });
-        viewer.scene.globe.depthTestAgainstTerrain = true;
+        // Terrain stays the default ellipsoid (no Ion world terrain), so depth-testing
+        // against it would hide our extrusions at grazing angles.
+        viewer.scene.globe.depthTestAgainstTerrain = false;
         viewer.scene.skyAtmosphere.show = true;
 
         const h = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
@@ -1209,9 +1223,14 @@
         }
 
         hideLoader();
-        if (topEntity) {
-            viewer.flyTo(topEntity, { duration: 2.0, offset: new Cesium.HeadingPitchRange(25, Cesium.Math.toRadians(-35), 600) });
-        }
+        // Frame the whole tower, not just the last slab.
+        const totalH = floors * (floorHeight + slabGap);
+        viewer.flyTo(viewer.entities, {
+            duration: 2.0,
+            offset: new Cesium.HeadingPitchRange(
+                Cesium.Math.toRadians(35), Cesium.Math.toRadians(-30),
+                Math.max(220, totalH * 3.2))
+        }).catch(() => {});
         toast(`Rendered ${floors} floors · ${floors * flatsPerFloor} addressable sub-units.`, 'success');
     }
 
