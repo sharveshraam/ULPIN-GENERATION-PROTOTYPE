@@ -371,6 +371,10 @@
                 <div id="cursorCoords" class="hidden lg:block text-[11px] font-mono text-sky-300/90 glass-soft px-3 py-1.5 rounded-lg whitespace-nowrap">
                     Cursor idle
                 </div>
+                <button id="loadHereBtn" onclick="loadBuildingsForView()"
+                    class="btn-primary px-3.5 py-2 rounded-lg text-xs font-semibold whitespace-nowrap">
+                    ⟳ Load buildings here
+                </button>
                 <div id="viewControls" class="hidden">
                     <button onclick="show2DMap()" class="btn-ghost px-3.5 py-2 rounded-lg text-xs font-medium">← Satellite</button>
                 </div>
@@ -381,12 +385,18 @@
             <div id="map2D" class="absolute inset-0 z-10"></div>
             <div id="cesiumContainer" class="absolute inset-0 z-0"></div>
 
-            <!-- Map legend -->
-            <div id="mapLegend" class="absolute bottom-5 left-5 z-20 glass rounded-xl px-4 py-3 text-[11px] space-y-2 pointer-events-none">
-                <div class="uppercase tracking-[.14em] text-slate-500 font-semibold text-[9px]">Legend</div>
-                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-sky-500/60 border border-sky-300"></span> Registered parcel</div>
-                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-emerald-500/60 border border-emerald-300"></span> Selected / active</div>
-                <div class="flex items-center gap-2 text-slate-500">Click a footprint to inspect</div>
+            <!-- Live stats bar -->
+            <div id="statsBar" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 glass rounded-full px-5 py-2 text-[11px] whitespace-nowrap max-w-[90vw] overflow-hidden"></div>
+
+            <!-- Map legend: height bands -->
+            <div id="mapLegend" class="absolute bottom-5 left-5 z-20 glass rounded-xl px-4 py-3 text-[11px] space-y-1.5 pointer-events-none">
+                <div class="uppercase tracking-[.14em] text-slate-500 font-semibold text-[9px] mb-1">Floors</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#f43f5e"></span> 40+ </div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#fb923c"></span> 25–39</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#facc15"></span> 12–24</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#38bdf8"></span> 5–11</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#22d3ee"></span> 1–4</div>
+                <div class="flex items-center gap-2 text-slate-500 pt-1 border-t border-white/10">Click a footprint</div>
             </div>
 
             <!-- Loading overlay -->
@@ -674,14 +684,14 @@
     /* =====================================================================
        MAP
        ===================================================================== */
-    let map, activePolygonLayers = [], selectedParcelData = null, selectedLayer = null;
+    let map, parcelGroup = null, activePolygonLayers = [], selectedParcelData = null, selectedLayer = null;
 
     const defaultParcels = [
-        { id: 901, name: "DEMO · Manhattan Central High-Rise Block A", floors: 35, state:"36", district:"06", subdist:"101", village:"000",
+        { id: 901, heightSource: "Demo data", name: "DEMO · Manhattan Central High-Rise Block A", floors: 35, state:"36", district:"06", subdist:"101", village:"000",
           bounds: [[40.7950, -73.9750], [40.8010, -73.9680]] },
-        { id: 902, name: "DEMO · Upper West Side Residential Tower B", floors: 28, state:"36", district:"06", subdist:"101", village:"000",
+        { id: 902, heightSource: "Demo data", name: "DEMO · Upper West Side Residential Tower B", floors: 28, state:"36", district:"06", subdist:"101", village:"000",
           bounds: [[40.7750, -73.9820], [40.7810, -73.9760]] },
-        { id: 903, name: "DEMO · Upper East Side Commercial Complex C", floors: 40, state:"36", district:"06", subdist:"101", village:"000",
+        { id: 903, heightSource: "Demo data", name: "DEMO · Upper East Side Commercial Complex C", floors: 40, state:"36", district:"06", subdist:"101", village:"000",
           bounds: [[40.7720, -73.9600], [40.7780, -73.9530]] }
     ];
 
@@ -695,7 +705,11 @@
     }
 
     function initMap() {
-        map = L.map('map2D', { zoomControl: true, attributionControl: true }).setView([40.7828, -73.9653], 13);
+        map = L.map('map2D', {
+            zoomControl: true, attributionControl: true,
+            preferCanvas: true            // canvas renderer: handles thousands of polygons
+        }).setView([40.7828, -73.9653], 13);
+        parcelGroup = L.layerGroup().addTo(map);
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             maxZoom: 19, attribution: 'Tiles &copy; Esri — Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP'
         }).addTo(map);
@@ -707,26 +721,62 @@
         initCesium();
     }
 
+    // Colour footprints by height so a whole neighbourhood reads at a glance.
+    function floorColor(f) {
+        if (f >= 40) return '#f43f5e';
+        if (f >= 25) return '#fb923c';
+        if (f >= 12) return '#facc15';
+        if (f >= 5)  return '#38bdf8';
+        return '#22d3ee';
+    }
+
+    function baseStyle(p) {
+        const c = floorColor(p.floors);
+        return { color: c, fillColor: c, fillOpacity: .35, weight: 1, opacity: .9 };
+    }
+
     function renderParcelsOnMap(parcels) {
-        activePolygonLayers.forEach(l => map.removeLayer(l));
+        if (parcelGroup) parcelGroup.clearLayers();
         activePolygonLayers = [];
-        parcels.forEach((parcel, idx) => {
-            const layer = L.polygon(parcel.coords, {
-                color: '#7dd3fc', fillColor: '#0ea5e9', fillOpacity: 0.28, weight: 2, dashArray: '6 4'
-            }).addTo(map);
+        selectedLayer = null;
 
-            layer.bindTooltip(`${parcel.name} · ${parcel.floors} fl`, { className: 'parcel-tip', direction: 'top', sticky: true });
-
-            layer.on('mouseover', () => layer.setStyle({ fillOpacity: .45, weight: 3 }));
-            layer.on('mouseout', () => { if (layer !== selectedLayer) layer.setStyle({ fillOpacity: .28, weight: 2 }); });
+        // Batch insertion keeps the UI responsive with thousands of polygons.
+        const layers = parcels.map(parcel => {
+            const layer = L.polygon(parcel.coords, baseStyle(parcel));
+            layer._parcel = parcel;
+            layer.on('mouseover', () => layer.setStyle({ fillOpacity: .65, weight: 2.5 }));
+            layer.on('mouseout', () => { if (layer !== selectedLayer) layer.setStyle(baseStyle(parcel)); });
             layer.on('click', () => selectParcel(parcel, layer));
-
-            // Staggered reveal
-            const el = layer.getElement && layer.getElement();
-            if (el) { el.style.opacity = 0; el.style.transition = 'opacity .5s ease'; setTimeout(() => el.style.opacity = 1, 90 * idx); }
-
             activePolygonLayers.push(layer);
+            return layer;
         });
+
+        // Tooltips are bound lazily on first hover — binding thousands upfront is slow.
+        layers.forEach(l => l.once('mouseover', () => {
+            l.bindTooltip(`${l._parcel.name} · ${l._parcel.floors} fl`,
+                { className: 'parcel-tip', direction: 'top', sticky: true }).openTooltip();
+        }));
+
+        parcelGroup.addLayer(L.featureGroup(layers));
+        updateStatsBar(parcels);
+    }
+
+    // Live summary of everything currently loaded.
+    function updateStatsBar(parcels) {
+        const bar = document.getElementById('statsBar');
+        if (!bar) return;
+        if (!parcels.length) { bar.classList.add('hidden'); return; }
+        const floors = parcels.map(p => p.floors);
+        const tagged = parcels.filter(p => p.heightSource.startsWith('OSM')).length;
+        const tallest = parcels.reduce((a, b) => (b.floors > a.floors ? b : a));
+        const units = parcels.reduce((s, p) => s + p.floors, 0);
+        bar.innerHTML =
+            `<span class="text-slate-400">Loaded</span> <b class="text-sky-300">${parcels.length.toLocaleString()}</b> buildings` +
+            `<span class="mx-2 text-slate-700">·</span><span class="text-slate-400">tagged</span> <b class="text-emerald-300">${Math.round(tagged / parcels.length * 100)}%</b>` +
+            `<span class="mx-2 text-slate-700">·</span><span class="text-slate-400">max</span> <b class="text-amber-300">${Math.max(...floors)} fl</b>` +
+            `<span class="mx-2 text-slate-700">·</span><span class="text-slate-400">~</span><b class="text-indigo-300">${units.toLocaleString()}</b> <span class="text-slate-400">floor-plates</span>` +
+            `<span class="mx-2 text-slate-700">·</span><span class="text-slate-500 truncate">tallest: ${tallest.name}</span>`;
+        bar.classList.remove('hidden');
     }
 
     /* =====================================================================
@@ -777,9 +827,9 @@
        PARCEL SELECTION -> DETAILED OVERVIEW
        ===================================================================== */
     function selectParcel(parcel, layer) {
-        if (selectedLayer) selectedLayer.setStyle({ color: '#7dd3fc', fillColor: '#0ea5e9', fillOpacity: .28, weight: 2, dashArray: '6 4' });
+        if (selectedLayer && selectedLayer._parcel) selectedLayer.setStyle(baseStyle(selectedLayer._parcel));
         selectedLayer = layer;
-        layer.setStyle({ color: '#6ee7b7', fillColor: '#10b981', fillOpacity: .38, weight: 3, dashArray: null });
+        layer.setStyle({ color: '#ffffff', fillColor: '#10b981', fillOpacity: .75, weight: 3, opacity: 1 });
 
         const m = ringMetrics(parcel.ring);
         const ulpin = generateUlpin(parcel);
@@ -900,7 +950,8 @@
 
     function closePanel() {
         document.getElementById('resultPanel').classList.add('hidden');
-        if (selectedLayer) { selectedLayer.setStyle({ color: '#7dd3fc', fillColor: '#0ea5e9', fillOpacity: .28, weight: 2, dashArray: '6 4' }); selectedLayer = null; }
+        if (selectedLayer && selectedLayer._parcel) selectedLayer.setStyle(baseStyle(selectedLayer._parcel));
+        selectedLayer = null;
     }
 
     function copyUlpin() {
@@ -919,34 +970,56 @@
         'https://maps.mail.ru/osm/tools/overpass/api/interpreter'
     ];
 
-    // Pull REAL building footprints (with geometry) around a point.
-    async function fetchBuildingFootprints(lat, lon, radius = 350) {
-        const q = `[out:json][timeout:25];(way[building](around:${radius},${lat},${lon});` +
-                  `relation[building](around:${radius},${lat},${lon}););out geom 80;`;
+    // Hard ceiling purely to protect the browser from pathological areas.
+    const MAX_BUILDINGS = 6000;
+
+    // Pull EVERY building footprint inside a bounding box (no arbitrary cap).
+    // bbox order for Overpass is (south,west,north,east).
+    async function fetchBuildingsInBBox(bounds, onProgress) {
+        const s = bounds.getSouth(), w = bounds.getWest(),
+              n = bounds.getNorth(), e = bounds.getEast();
+        const bbox = `${s},${w},${n},${e}`;
+        // No "out geom N" limit -> Overpass returns the full set for the bbox.
+        const q = `[out:json][timeout:90];(way["building"](${bbox});` +
+                  `relation["building"](${bbox}););out geom;`;
+
+        let lastErr = null;
         for (const mirror of OVERPASS_MIRRORS) {
             try {
+                if (onProgress) onProgress(`Querying ${new URL(mirror).hostname}…`);
                 const res = await fetch(mirror, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: 'data=' + encodeURIComponent(q)
                 });
-                if (!res.ok) continue;                       // 429 / 504 -> try next mirror
+                if (!res.ok) { lastErr = `HTTP ${res.status}`; continue; }  // 429/504 -> next mirror
+                if (onProgress) onProgress('Parsing footprints…');
                 const data = await res.json();
+
+                const cLat = (s + n) / 2, cLon = (w + e) / 2;
                 const out = [];
                 for (const el of (data.elements || [])) {
                     if (!el.tags || !el.tags.building) continue;
-                    // ways carry .geometry; relations carry .members[].geometry
+                    if (el.tags.building === 'roof') continue;   // canopies, not structures
                     let g = el.geometry;
-                    if (!g && el.members) g = (el.members.find(m => m.role === 'outer' && m.geometry) || {}).geometry;
+                    if (!g && el.members) {
+                        const outer = el.members.filter(m => m.role === 'outer' && m.geometry);
+                        if (outer.length) g = outer[0].geometry;
+                    }
                     if (!g || g.length < 4) continue;
-                    out.push(makeBuildingParcel(el, g, lat, lon));
+                    out.push(makeBuildingParcel(el, g, cLat, cLon));
                 }
                 if (out.length) {
-                    out.sort((a, b) => a.dist - b.dist);
-                    return { buildings: out.slice(0, 12), mirror };
+                    out.sort((a, b) => a.dist - b.dist);   // nearest to view centre first
+                    return { buildings: out, mirror, truncated: out.length > MAX_BUILDINGS };
                 }
-            } catch (e) { console.warn('Overpass mirror failed', mirror, e); }
+                lastErr = 'no buildings in response';
+            } catch (err) {
+                lastErr = err.message;
+                console.warn('Overpass mirror failed', mirror, err);
+            }
         }
+        console.warn('All Overpass mirrors failed:', lastErr);
         return null;
     }
 
@@ -1013,37 +1086,78 @@
        ===================================================================== */
     async function analyseLocation(lat, lon, label) {
         showLoader('Loading satellite imagery…', label);
-        map.flyTo([lat, lon], 14, { duration: 1.6 });
+        // Zoom 16 ≈ a few hundred metres across — dense enough to be readable,
+        // wide enough to pull in a whole neighbourhood of buildings.
+        map.flyTo([lat, lon], 16, { duration: 1.4 });
+        await new Promise(r => map.once('moveend', r));
+        await loadBuildingsForView(label);
+    }
 
-        setTimeout(() => showLoader('Querying OSM Overpass…', 'Reading real building footprints, levels & heights'), 900);
+    // Loads every building in the CURRENT map viewport.
+    let loadingBuildings = false;
+    async function loadBuildingsForView(label) {
+        if (loadingBuildings) return;
+        loadingBuildings = true;
+        setLoadHereEnabled(false);
 
-        // Widen the search until we actually find tagged buildings.
-        let found = null;
-        for (const radius of [350, 900, 2000]) {
-            showLoader('Querying OSM Overpass…', `Scanning ${radius} m radius for building footprints`);
-            found = await fetchBuildingFootprints(lat, lon, radius);
-            if (found) break;
-        }
+        const bounds = map.getBounds();
+        const areaKm2 = viewAreaKm2(bounds);
 
-        if (!found) {
+        if (areaKm2 > 60) {
             hideLoader();
-            toast('Overpass returned no buildings here (or the API is rate-limiting). Try a denser urban area.', 'error', 6000);
+            toast(`View covers ~${Math.round(areaKm2)} km² — too wide for a full building query. Zoom in and press <b>Load buildings here</b>.`, 'error', 6000);
+            loadingBuildings = false; setLoadHereEnabled(true);
             return;
         }
 
-        showLoader('Minting ULPINs…', `${found.buildings.length} real parcels · 14-digit codes`);
-        await new Promise(r => setTimeout(r, 350));
+        showLoader('Querying OSM Overpass…',
+                   `Fetching every building in view (~${areaKm2.toFixed(1)} km²)`);
 
-        const parcels = found.buildings.map(b => ({ ...b, place: label }));
-        map.flyTo([lat, lon], 17, { duration: 1.2 });
+        const found = await fetchBuildingsInBBox(bounds, msg =>
+            showLoader('Querying OSM Overpass…', msg));
+
+        if (!found) {
+            hideLoader();
+            toast('No buildings returned — Overpass may be rate-limiting, or this area has no mapped buildings. Wait a moment and retry.', 'error', 7000);
+            loadingBuildings = false; setLoadHereEnabled(true);
+            return;
+        }
+
+        let parcels = found.buildings;
+        const total = parcels.length;
+        if (total > MAX_BUILDINGS) parcels = parcels.slice(0, MAX_BUILDINGS);
+        if (label) parcels = parcels.map(b => ({ ...b, place: label }));
+
+        showLoader('Minting ULPINs…', `${parcels.length} parcels · 14-digit codes`);
+        await new Promise(r => setTimeout(r, 200));
+
         renderParcelsOnMap(parcels);
         hideLoader();
-
-        setTimeout(() => selectParcel(parcels[0], activePolygonLayers[0]), 400);
+        loadingBuildings = false;
+        setLoadHereEnabled(true);
 
         const tagged = parcels.filter(p => p.heightSource.startsWith('OSM')).length;
-        toast(`<b>${label.split(',').slice(0,2).join(',')}</b> — ${parcels.length} real footprints, ` +
-              `${tagged} with OSM-tagged heights. Click any parcel to inspect.`, 'success', 5500);
+        const pct = parcels.length ? Math.round(tagged / parcels.length * 100) : 0;
+        const capped = total > MAX_BUILDINGS
+            ? ` (showing nearest ${MAX_BUILDINGS} of ${total})` : '';
+        toast(`<b>${parcels.length.toLocaleString()}</b> buildings loaded${capped} · ` +
+              `${pct}% have OSM-tagged heights. Click any footprint to inspect.`, 'success', 6000);
+    }
+
+    function viewAreaKm2(b) {
+        const midLat = (b.getSouth() + b.getNorth()) / 2;
+        const h = (b.getNorth() - b.getSouth()) * 110.574;
+        const w = (b.getEast() - b.getWest()) * 111.320 * Math.cos(midLat * Math.PI / 180);
+        return Math.abs(h * w);
+    }
+
+    function setLoadHereEnabled(on) {
+        const btn = document.getElementById('loadHereBtn');
+        if (!btn) return;
+        btn.disabled = !on;
+        btn.classList.toggle('opacity-50', !on);
+        btn.classList.toggle('cursor-not-allowed', !on);
+        btn.innerHTML = on ? '⟳ Load buildings here' : 'Loading…';
     }
 
     /* =====================================================================
