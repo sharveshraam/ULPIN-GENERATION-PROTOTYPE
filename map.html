@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map Console — ULPIN Atlas</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+        rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏙️</text></svg>">
+</head>
+
+<body class="h-screen overflow-hidden">
+
+    <div class="h-screen flex flex-col">
+
+        <!-- ============================ HEADER ============================ -->
+        <header class="glass border-b border-white/10 px-4 py-2.5 flex items-center gap-4 z-40 shrink-0">
+            <a href="index.html" class="flex items-center gap-2.5 shrink-0" title="Back to home">
+                <div class="w-8 h-8 rounded-lg btn-primary grid place-items-center">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2 3 7v10l9 5 9-5V7z" />
+                    </svg>
+                </div>
+                <div class="hide-sm">
+                    <div class="font-bold text-sm leading-none">ULPIN <span class="gradient-text">Atlas</span></div>
+                    <div class="text-[9px] uppercase tracking-[.16em] text-slate-500 mt-0.5">Map Console</div>
+                </div>
+            </a>
+
+            <!-- Search -->
+            <div class="flex-1 max-w-md relative">
+                <div class="glass-soft rounded-xl flex items-center gap-2 pl-3 pr-1.5 py-1">
+                    <svg class="w-4 h-4 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+                    </svg>
+                    <input id="searchInput" type="text" autocomplete="off"
+                        placeholder="Search a place, or paste a ULPIN…   (press /)"
+                        class="flex-1 bg-transparent outline-none py-2 text-sm placeholder:text-slate-600">
+                    <button onclick="doSearch()" class="btn-primary px-3.5 py-1.5 rounded-lg text-xs shrink-0">Go</button>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 shrink-0 ml-auto">
+                <span id="apiPill" class="hidden md:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-off">
+                    <span class="w-1.5 h-1.5 rounded-full bg-current"></span> Checking…
+                </span>
+                <button onclick="MapApp.exportGeoJSON()" class="btn-ghost px-3 py-2 rounded-lg text-xs hide-sm">GeoJSON</button>
+                <button onclick="MapApp.exportCSV()" class="btn-ghost px-3 py-2 rounded-lg text-xs hide-sm">CSV</button>
+            </div>
+        </header>
+
+        <!-- ============================= BODY ============================= -->
+        <div class="flex-1 relative overflow-hidden">
+
+            <!-- Control panel -->
+            <div class="absolute top-4 left-4 z-30 w-64 glass rounded-2xl p-4 space-y-4">
+                <div>
+                    <div class="text-[10px] uppercase tracking-[.16em] text-slate-500 font-semibold mb-2">Scan radius</div>
+                    <select id="radiusSelect" onchange="MapApp.updateRadiusPreview()"
+                        class="w-full glass-soft rounded-lg px-3 py-2 text-sm">
+                        <option value="0.1">100 m — a single block</option>
+                        <option value="0.5">500 m — a neighbourhood</option>
+                        <option value="1" selected>1 km — recommended</option>
+                        <option value="2">2 km — a district</option>
+                        <option value="5">5 km — maximum</option>
+                    </select>
+                    <p class="text-[10px] text-slate-500 mt-2 leading-relaxed">
+                        The dashed circle marks the area centred on your current view.
+                    </p>
+                </div>
+
+                <button id="generateBtn" onclick="MapApp.generateForRadius()"
+                    class="btn-primary w-full py-2.5 rounded-xl text-sm">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path d="M13 2 3 14h8l-1 8 10-12h-8z" />
+                    </svg>
+                    Generate ULPINs
+                </button>
+
+                <div class="pt-3 border-t border-white/10">
+                    <div class="text-[10px] uppercase tracking-[.16em] text-slate-500 font-semibold mb-2">Height legend</div>
+                    <div class="space-y-1.5 text-[11px]">
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#f43f5e"></span> 40+ floors</div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#fb923c"></span> 25–39</div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#facc15"></span> 12–24</div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#38bdf8"></span> 5–11</div>
+                        <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm" style="background:#22d3ee"></span> 1–4</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats bar -->
+            <div id="statsBar"
+                class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 glass rounded-full px-5 py-2 text-[11px] whitespace-nowrap max-w-[52vw] overflow-hidden hide-sm"></div>
+
+            <div id="map" class="absolute inset-0 z-10"></div>
+
+            <!-- Loading overlay -->
+            <div id="loader" class="hidden absolute inset-0 z-40 bg-slate-950/72 backdrop-blur-sm grid place-items-center">
+                <div class="text-center w-72">
+                    <div class="radar"></div>
+                    <div id="loaderText" class="mt-5 text-sm font-medium text-slate-200">Working…</div>
+                    <div id="loaderSub" class="mt-1.5 text-[11px] text-slate-500">Please wait</div>
+                    <div id="loaderBarWrap" class="hidden mt-4 h-1 rounded-full bg-white/10 overflow-hidden">
+                        <div id="loaderBar" class="h-full rounded-full transition-all duration-500"
+                            style="width:0%;background:linear-gradient(90deg,#6366f1,#8b5cf6,#38bdf8)"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===================== DETAILS PANEL ===================== -->
+            <aside id="detailsPanel"
+                class="hidden side-panel absolute bottom-4 right-4 z-30 w-[370px] glass rounded-2xl overflow-hidden transition-transform duration-300">
+                <div class="p-5 pb-4 border-b border-white/10 relative">
+                    <div class="absolute -top-16 -right-16 w-40 h-40 rounded-full bg-indigo-500/20 blur-3xl pointer-events-none"></div>
+                    <div class="flex items-start justify-between gap-3 relative">
+                        <div class="min-w-0">
+                            <div class="text-[9px] uppercase tracking-[.18em] text-indigo-400 font-semibold mb-1.5">
+                                Building details</div>
+                            <h3 id="dTitle" class="font-bold text-base leading-snug truncate">—</h3>
+                            <p id="dSubtitle" class="text-[11px] text-slate-500 mt-1 truncate">—</p>
+                        </div>
+                        <button onclick="Details.hide()" class="btn-ghost w-7 h-7 rounded-lg shrink-0">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <path d="M18 6 6 18M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="dBadges" class="flex flex-wrap gap-1.5 mt-3 relative"></div>
+                </div>
+
+                <div class="p-5 space-y-4">
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-[10px] uppercase tracking-[.14em] text-slate-500 font-semibold">ULPIN</span>
+                            <button onclick="Details.copyUlpin()" class="text-[10px] btn-ghost px-2 py-1 rounded-md">Copy</button>
+                        </div>
+                        <div id="dUlpin" class="font-mono text-lg tracking-[.1em] text-center py-2.5 rounded-xl glass-soft"></div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div class="stat-card glass-soft rounded-xl p-3">
+                            <div class="text-[10px] text-slate-500 mb-1">Floors</div>
+                            <div id="dFloors" class="text-xl font-bold text-sky-300">—</div>
+                        </div>
+                        <div class="stat-card glass-soft rounded-xl p-3">
+                            <div class="text-[10px] text-slate-500 mb-1">Units</div>
+                            <div id="dUnits" class="text-xl font-bold text-indigo-300">—</div>
+                        </div>
+                        <div class="stat-card glass-soft rounded-xl p-3">
+                            <div class="text-[10px] text-slate-500 mb-1">Height</div>
+                            <div id="dHeight" class="text-lg font-bold text-violet-300">—</div>
+                        </div>
+                        <div class="stat-card glass-soft rounded-xl p-3">
+                            <div class="text-[10px] text-slate-500 mb-1">Footprint</div>
+                            <div id="dArea" class="text-lg font-bold text-teal-300">—</div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="Details.open3D()" class="btn-primary py-2.5 rounded-xl text-xs">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2 3 7v10l9 5 9-5V7z" /><path d="M12 22V12M3 7l9 5 9-5" />
+                            </svg>
+                            View 3D model
+                        </button>
+                        <button onclick="Details.exportBuildingGeoJSON()" class="btn-ghost py-2.5 rounded-xl text-xs">
+                            Download data
+                        </button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- ========================== 3D MODAL =========================== -->
+    <div id="modal3d" class="modal hidden fixed inset-0 z-[70] bg-slate-950/80 backdrop-blur-sm p-3 md:p-8">
+        <div class="modal-card glass rounded-2xl w-full h-full max-w-7xl mx-auto flex flex-col overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-white/10 flex items-center justify-between gap-4 shrink-0">
+                <div class="min-w-0">
+                    <h3 id="m3dTitle" class="font-bold truncate">Building</h3>
+                    <p id="m3dMeta" class="text-[11px] text-slate-500 truncate">—</p>
+                </div>
+                <div id="m3dStats" class="text-[11px] hidden md:block text-slate-400"></div>
+                <button onclick="UI.closeModal('modal3d')" class="btn-ghost w-8 h-8 rounded-lg shrink-0">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <div class="flex-1 grid lg:grid-cols-[1.55fr_1fr] overflow-hidden">
+                <!-- 3D canvas -->
+                <div class="relative bg-slate-950/60 min-h-[280px]">
+                    <div id="viewer3d" class="absolute inset-0"></div>
+                    <div id="viewer3dTip"
+                        class="hidden absolute z-20 pointer-events-none glass rounded-lg px-3 py-2 text-[11px] leading-snug"></div>
+                    <div class="absolute bottom-3 left-3 text-[10px] text-slate-500 glass rounded-lg px-2.5 py-1.5 pointer-events-none">
+                        Drag to orbit · scroll to zoom · click a floor to filter units
+                    </div>
+                </div>
+
+                <!-- Floor + unit registry -->
+                <div class="border-l border-white/10 flex flex-col overflow-hidden">
+                    <div class="p-4 pb-2 shrink-0">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-[10px] uppercase tracking-[.14em] text-slate-500 font-semibold">Floor breakdown</span>
+                            <button onclick="Details.exportFloors()" class="text-[10px] btn-ghost px-2 py-1 rounded-md">Export CSV</button>
+                        </div>
+                    </div>
+                    <div id="floorList" class="px-4 space-y-1 overflow-y-auto max-h-[38%] shrink-0"></div>
+
+                    <div class="p-4 pb-2 border-t border-white/10 mt-2 shrink-0">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-[10px] uppercase tracking-[.14em] text-slate-500 font-semibold">Unit registry</span>
+                            <div class="flex gap-1">
+                                <button id="unitPrev" onclick="Details.pageUnits(-1)"
+                                    class="btn-ghost px-2 py-1 rounded-md text-[10px] disabled:opacity-40">Prev</button>
+                                <button id="unitNext" onclick="Details.pageUnits(1)"
+                                    class="btn-ghost px-2 py-1 rounded-md text-[10px] disabled:opacity-40">Next</button>
+                            </div>
+                        </div>
+                        <div id="unitMeta" class="text-[10px] text-slate-500"></div>
+                    </div>
+                    <div id="unitList" class="px-4 pb-4 space-y-1 overflow-y-auto flex-1"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toasts" class="fixed top-16 left-1/2 -translate-x-1/2 z-[80] space-y-2 w-[min(92vw,430px)]"></div>
+
+    <!-- Libraries -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <!-- three r128: last line that ships UMD globals (build/three.min.js and
+         examples/js/*). Newer releases are ES-module only, which would need
+         an importmap and break the plain-script setup used here. -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <!-- App modules -->
+    <script src="js/api.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/3d-viewer.js"></script>
+    <script src="js/details.js"></script>
+    <script src="js/map.js"></script>
+
+    <script>
+        MapApp.init();
+
+        function doSearch() {
+            const q = document.getElementById('searchInput').value.trim();
+            if (!q) return;
+            // A 14/17/20-digit string is a ULPIN lookup, not a place name.
+            if (/^\d{14}(\d{3})?(\d{3})?$/.test(q)) {
+                lookupUlpin(q);
+            } else {
+                MapApp.searchLocation(q);
+            }
+        }
+
+        async function lookupUlpin(ulpin) {
+            const base = ulpin.slice(0, 14);
+            // Try anything already loaded on the map first.
+            const hit = MapApp.buildings.find(b => b.properties.ulpin === base);
+            if (hit) {
+                MapApp.map.flyTo([hit.properties.centroid_lat, hit.properties.centroid_lon], 18, { duration: 1.2 });
+                Details.show(hit);
+                UI.toast(`Found ${base} on the current map.`, 'success');
+                return;
+            }
+            if (!API.isOnline) {
+                UI.toast('That ULPIN is not in the current view, and the backend is offline.', 'warn', 6000);
+                return;
+            }
+            UI.showLoader('Looking up ULPIN…', base);
+            try {
+                const r = await API.getParcel(base);
+                UI.hideLoader();
+                const f = r.data;
+                MapApp.map.flyTo([f.properties.centroid_lat, f.properties.centroid_lon], 18, { duration: 1.2 });
+                Details.show(f);
+                UI.toast(`Loaded ${base} from the registry.`, 'success');
+            } catch (e) {
+                UI.hideLoader();
+                UI.toast(`No parcel found for ${base}.`, 'error');
+            }
+        }
+
+        document.getElementById('searchInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter') doSearch();
+        });
+
+        // Keyboard shortcuts: "/" focuses search, Escape closes the 3D modal.
+        document.addEventListener('keydown', e => {
+            if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+                e.preventDefault();
+                document.getElementById('searchInput').focus();
+            }
+            if (e.key === 'Escape') UI.closeModal('modal3d');
+        });
+
+        window.addEventListener('resize', () => Viewer3D.resize());
+
+        (async () => {
+            const pill = document.getElementById('apiPill');
+            const health = await API.checkHealth();
+            if (health) {
+                pill.className = 'hidden md:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-live';
+                pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-current"></span> API live · ${health.parcels} stored`;
+            } else {
+                pill.className = 'hidden md:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-off';
+                pill.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-current"></span> Browser mode';
+                pill.title = 'Backend unreachable — floors and units are computed in the browser.';
+                UI.toast('Backend offline — running in browser mode. Everything still works.', 'info', 5500);
+            }
+        })();
+    </script>
+</body>
+
+</html>
