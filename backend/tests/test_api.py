@@ -561,3 +561,41 @@ def test_preflight_allows_json_post_from_pages_origin():
     )
     assert res.status_code == 200
     assert "access-control-allow-origin" in res.headers
+
+
+# --------------------------------------------------------------------------- #
+# Health-probe aliases
+#
+# "/health" is a path token that ad-block and tracking-prevention filter lists
+# commonly match, which cancels the request with ERR_BLOCKED_BY_CLIENT before
+# it leaves the browser. The aliases give the client an identical endpoint
+# under a name no filter list targets.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("path", ["/health", "/status", "/ulpin-status"])
+def test_health_aliases_return_identical_payload(path):
+    res = client.get(path)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "ok"
+    assert body["database"] == "connected"
+    assert body == client.get("/health").json()
+
+
+@pytest.mark.parametrize("path", ["/status", "/ulpin-status"])
+def test_health_aliases_send_cors_header(path):
+    origin = "https://sharveshraam.github.io"
+    res = client.get(path, headers={"Origin": origin})
+    assert res.headers.get("access-control-allow-origin") in (origin, "*")
+
+
+def test_health_aliases_are_hidden_from_schema():
+    """They are plumbing, not public API - keep the docs clean."""
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/health" in paths
+    assert "/status" not in paths
+    assert "/ulpin-status" not in paths
+
+
+def test_health_aliases_exempt_from_rate_limit():
+    from app.main import _EXEMPT
+    assert {"/health", "/status", "/ulpin-status"} <= _EXEMPT

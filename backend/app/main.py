@@ -83,7 +83,10 @@ logger.info(
 # Rate limiting (in-process; sufficient for a single Cloud Run instance)
 # --------------------------------------------------------------------------- #
 _hits: dict[str, deque] = defaultdict(deque)
-_EXEMPT = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/favicon.ico"}
+_EXEMPT = {
+    "/", "/health", "/status", "/ulpin-status",
+    "/docs", "/openapi.json", "/redoc", "/favicon.ico",
+}
 
 
 @app.middleware("http")
@@ -152,6 +155,21 @@ async def health(db: Session = Depends(get_db)):
 # --------------------------------------------------------------------------- #
 # ULPIN generation
 # --------------------------------------------------------------------------- #
+# Aliases for the health probe.
+#
+# Ad blockers and tracking-prevention lists match on URL path tokens, and
+# "/health" is a common one - it is widely used by analytics and uptime
+# beacons. When a filter list catches it the browser cancels the request with
+# ERR_BLOCKED_BY_CLIENT before it is ever sent, so the frontend cannot tell
+# the backend apart from a dead one. These aliases return exactly the same
+# payload under names no filter list targets, letting the client retry a
+# different path instead of giving up.
+@app.get("/status", response_model=HealthResponse, include_in_schema=False)
+@app.get("/ulpin-status", response_model=HealthResponse, include_in_schema=False)
+async def health_alias(db: Session = Depends(get_db)):
+    return await health(db)
+
+
 @app.post("/api/v1/generate-ulpin", tags=["ulpin"])
 async def generate_ulpin(payload: ULPINRequest):
     ulpin = ug.generate_ulpin_code(

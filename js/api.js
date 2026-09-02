@@ -35,6 +35,12 @@ const API = (() => {
   let online = false;
   let lastFailure = null;
 
+  // Health-probe paths, tried in order. All three return the identical
+  // payload; the aliases exist purely so a filter list matching the common
+  // "/health" token cannot take the status check down with it.
+  const HEALTH_PATHS = ['/health', '/status', '/ulpin-status'];
+  let healthPath = HEALTH_PATHS[0];
+
   const url = (path) => `${BASE}${path}`;
 
   /**
@@ -108,24 +114,32 @@ const API = (() => {
       lastFailure = null;
 
       // Fast path: a warm backend answers well inside this.
-      const started = Date.now();
-      try {
-        const r = await request('/health', {}, 8000);
-        online = r.status === 'ok';
-        return r;
-      } catch (err) {
-        // A request killed by an ad blocker, privacy extension or tracking
-        // prevention never reaches the network: it rejects with a TypeError
-        // almost instantly (ERR_BLOCKED_BY_CLIENT). A sleeping host behaves
-        // the opposite way - it hangs. Use that to tell them apart, because
-        // retrying for 75s cannot help a blocked request and reporting
-        // "offline" sends people to debug a server that is perfectly fine.
-        if (isLikelyBlocked(err, Date.now() - started)) {
-          lastFailure = 'blocked';
-          online = false;
-          return null;
+      //
+      // Try each probe path in turn. "/health" is a token many ad-block and
+      // tracking-prevention filter lists match, so when it is cancelled with
+      // ERR_BLOCKED_BY_CLIENT the identical aliases below usually sail
+      // through - the request is only being judged on its URL.
+      let blockedAll = true;
+      for (const path of HEALTH_PATHS) {
+        const started = Date.now();
+        try {
+          const r = await request(path, {}, 8000);
+          online = r.status === 'ok';
+          healthPath = path;
+          return r;
+        } catch (err) {
+          // A request killed by an ad blocker, privacy extension or tracking
+          // prevention never reaches the network: it rejects with a TypeError
+          // almost instantly. A sleeping host behaves the opposite way - it
+          // hangs. Use that to tell them apart, because retrying for 75s
+          // cannot help a blocked request and reporting "offline" sends
+          // people to debug a server that is perfectly fine.
+          if (!isLikelyBlocked(err, Date.now() - started)) { blockedAll = false; break; }
         }
       }
+      // Every alias was cancelled locally: this is definitely a client-side
+      // blocker, and no amount of retrying will change that.
+      if (blockedAll) { lastFailure = 'blocked'; online = false; return null; }
 
       // Nothing to wake if no backend is configured at all.
       if (!BASE) { lastFailure = 'unconfigured'; online = false; return null; }
@@ -138,7 +152,7 @@ const API = (() => {
       while (Date.now() < deadline) {
         const attempt = Date.now();
         try {
-          const r = await request('/health', {}, 20000);
+          const r = await request(healthPath, {}, 20000);
           online = r.status === 'ok';
           return r;
         } catch (err) {
