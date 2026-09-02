@@ -415,7 +415,11 @@
         // about whether results come from the server or the browser.
         (async () => {
             const pill = document.getElementById('apiPill');
-            const health = await API.checkHealth();
+            const health = await API.checkHealth(() => {
+                pill.className = 'hidden sm:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-off';
+                pill.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span> Waking backend…';
+                pill.title = 'Free-tier host is starting up — this can take up to a minute.';
+            });
             if (health) {
                 pill.className = 'hidden sm:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-live';
                 pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-current"></span> API live · ${health.parcels} parcels`;

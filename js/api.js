@@ -55,16 +55,43 @@ const API = (() => {
     get base() { return BASE; },
     get isOnline() { return online; },
 
-    /** Probe /health so the UI can show an accurate status pill. */
-    async checkHealth() {
+    /**
+     * Probe /health so the UI can show an accurate status pill.
+     *
+     * Free-tier hosts (Render, Fly, etc.) suspend idle services, and the first
+     * request then takes ~50s while the container wakes. A short timeout makes
+     * a perfectly healthy backend look offline, so this retries with a
+     * generous budget before giving up.
+     *
+     * @param {function} onWaking called once if the first quick probe fails,
+     *                            so the UI can say "waking backend…"
+     */
+    async checkHealth(onWaking) {
+      // Fast path: a warm backend answers well inside this.
       try {
-        const r = await request('/health', {}, 6000);
+        const r = await request('/health', {}, 8000);
         online = r.status === 'ok';
         return r;
-      } catch {
-        online = false;
-        return null;
+      } catch (_) { /* fall through to the slow path */ }
+
+      // Nothing to wake if no backend is configured at all.
+      if (!BASE) { online = false; return null; }
+
+      if (typeof onWaking === 'function') { try { onWaking(); } catch (_) {} }
+
+      // Slow path: cold start. Poll until the service answers or we give up.
+      const deadline = Date.now() + 75000;
+      while (Date.now() < deadline) {
+        try {
+          const r = await request('/health', {}, 20000);
+          online = r.status === 'ok';
+          return r;
+        } catch (_) {
+          await new Promise(res => setTimeout(res, 2500));
+        }
       }
+      online = false;
+      return null;
     },
 
     generateUlpin: (payload) =>
