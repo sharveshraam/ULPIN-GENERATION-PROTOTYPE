@@ -17,6 +17,6 @@
  *
  * The value is a public API endpoint, not a secret — safe to commit.
  */
-const API_BASE_URL = '';
+const API_BASE_URL = 'https://ulpin-generation-prototype.onrender.com';
 
 window.API_BASE_URL = API_BASE_URL;
