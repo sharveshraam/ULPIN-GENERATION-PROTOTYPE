@@ -124,6 +124,35 @@ curl -X POST http://127.0.0.1:8000/api/v1/bulk-generate \
 
 ---
 
+## Find a parcel by ULPIN
+
+Paste any ULPIN into the search box and the map flies to it. The box accepts
+both a place name and a ULPIN — anything matching a ULPIN pattern is treated as
+a lookup, everything else is geocoded as before.
+
+| Input | Behaviour |
+| --- | --- |
+| `32070410180902` (14) | Fly to the parcel and select it |
+| `32070410180902003` (17) | …and open floor 3 in the details panel |
+| `32070410180902003012` (20) | …floor 3, unit 12 |
+| `IND-TN-001-CHE-F03-U301` | Hyphenated form, case-insensitive |
+| partial digits | Falls back to the search index |
+
+Resolution runs cheapest-first: a building already drawn on the map is used
+without any network call; otherwise `/api/v1/parcels/{ulpin}` is tried; failing
+that, `/api/v1/search`. A parcel fetched this way is **drawn on the map**, not
+just flown over, and pulses briefly so it is obvious once the flight ends.
+
+Failures are reported distinctly, because "not found" has several causes: an
+invalid format, the backend being offline, or the parcel genuinely not being in
+the registry yet. Note the hyphenated format encodes no coordinates, so it can
+only be located after that parcel has been generated and stored.
+
+`MapApp.gotoUlpin(ulpin)` is exported if you want to drive this from code; it
+resolves to `{ ok, reason, ulpin }`.
+
+---
+
 ## How floor counts stay accurate
 
 A naive `floors = height / 3.5` is wrong for tall towers, because published

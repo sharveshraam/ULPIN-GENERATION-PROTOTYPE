@@ -41,7 +41,7 @@
                         <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
                     </svg>
                     <input id="searchInput" type="text" autocomplete="off"
-                        placeholder="Search a place, or paste a ULPIN…   (press /)"
+                        placeholder="Place name, or paste a ULPIN to fly there…   (press /)"
                         class="flex-1 bg-transparent outline-none py-2 text-sm placeholder:text-slate-600">
                     <button onclick="doSearch()" class="btn-primary px-3.5 py-1.5 rounded-lg text-xs shrink-0">Go</button>
                 </div>
@@ -260,39 +260,60 @@
         function doSearch() {
             const q = document.getElementById('searchInput').value.trim();
             if (!q) return;
-            // A 14/17/20-digit string is a ULPIN lookup, not a place name.
-            if (/^\d{14}(\d{3})?(\d{3})?$/.test(q)) {
+            // A ULPIN (numeric or hyphenated) is a lookup, not a place name.
+            if (MapApp.looksLikeUlpin(q)) {
                 lookupUlpin(q);
             } else {
                 MapApp.searchLocation(q);
             }
         }
 
+        /**
+         * Resolve a ULPIN and fly the map to it. MapApp.gotoUlpin does the
+         * work; this reports the outcome in language that says what to do
+         * next, since "not found" has several very different causes.
+         */
         async function lookupUlpin(ulpin) {
-            const base = ulpin.slice(0, 14);
-            // Try anything already loaded on the map first.
-            const hit = MapApp.buildings.find(b => b.properties.ulpin === base);
-            if (hit) {
-                MapApp.map.flyTo([hit.properties.centroid_lat, hit.properties.centroid_lon], 18, { duration: 1.2 });
-                Details.show(hit);
-                UI.toast(`Found ${base} on the current map.`, 'success');
-                return;
-            }
-            if (!API.isOnline) {
-                UI.toast('That ULPIN is not in the current view, and the backend is offline.', 'warn', 6000);
-                return;
-            }
-            UI.showLoader('Looking up ULPIN…', base);
+            const parsed = MapApp.parseUlpin(ulpin);
+            const label = parsed ? parsed.canonical : ulpin;
+
+            UI.showLoader('Locating ULPIN…', label);
+            let res;
             try {
-                const r = await API.getParcel(base);
+                res = await MapApp.gotoUlpin(ulpin);
+            } catch (err) {
                 UI.hideLoader();
-                const f = r.data;
-                MapApp.map.flyTo([f.properties.centroid_lat, f.properties.centroid_lon], 18, { duration: 1.2 });
-                Details.show(f);
-                UI.toast(`Loaded ${base} from the registry.`, 'success');
-            } catch (e) {
-                UI.hideLoader();
-                UI.toast(`No parcel found for ${base}.`, 'error');
+                UI.toast(`Lookup failed: ${err.message || err}`, 'error', 6000);
+                return;
+            }
+            UI.hideLoader();
+
+            if (res.ok) {
+                const where = {
+                    onmap: 'already on this map',
+                    registry: 'from the registry',
+                    search: 'via search',
+                }[res.reason] || '';
+                let msg = `Found ${res.ulpin} ${where}.`;
+                if (parsed && parsed.floor != null) msg += ` Floor ${parsed.floor} highlighted.`;
+                if (res.count > 1) msg += ` ${res.count} parcels matched; showing the first.`;
+                UI.toast(msg, 'success', 5000);
+                return;
+            }
+
+            if (res.reason === 'format') {
+                UI.toast('Not a valid ULPIN. Expected 14, 17 or 20 digits, ' +
+                         'or the form IND-TN-001-CHE-F03-U301.', 'error', 7000);
+            } else if (res.reason === 'offline') {
+                UI.toast('That ULPIN is not on the current map, and the backend is offline — ' +
+                         'connect the API (click the status pill) to search the registry.', 'warn', 7000);
+            } else if (parsed && parsed.custom) {
+                UI.toast(`${label} is not in the registry. The hyphenated format carries no ` +
+                         'coordinates, so it can only be located once that parcel has been generated.',
+                         'error', 8000);
+            } else {
+                UI.toast(`No parcel found for ${label}. Generate ULPINs for that area first, ` +
+                         'then search again.', 'error', 7000);
             }
         }
 

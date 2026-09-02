@@ -22,6 +22,7 @@ const MapApp = (() => {
   let buildings = [];               // current feature list
   let selected = null;
   let busy = false;
+  let layerIndex = new Map();       // ulpin -> Leaflet layer, for ULPIN lookup
 
   /* ------------------------- Height / floor rules -------------------------
      Mirrors backend/app/services/model_3d_generator.py so offline results
@@ -304,11 +305,13 @@ const MapApp = (() => {
   function renderBuildings(features) {
     parcelLayer.clearLayers();
     selectedLayer = null;
+    layerIndex = new Map();
 
     const layers = features.map((f) => {
       const coords = f.geometry.coordinates[0].map(([lon, lat]) => [lat, lon]);
       const layer = L.polygon(coords, styleFor(f));
       layer._feature = f;
+      if (f.properties.ulpin) layerIndex.set(String(f.properties.ulpin), layer);
       layer.on('mouseover', () => layer.setStyle({ fillOpacity: 0.7, weight: 2.5 }));
       layer.on('mouseout', () => { if (layer !== selectedLayer) layer.setStyle(styleFor(f)); });
       layer.on('click', () => select(f, layer));
@@ -350,6 +353,141 @@ const MapApp = (() => {
     layer.setStyle({ color: '#ffffff', fillColor: '#10b981', fillOpacity: 0.8, weight: 3 });
     selected = feature;
     Details.show(feature);
+  }
+
+  /* ----------------------------- ULPIN lookup ---------------------------
+     "Enter a ULPIN, fly there." Accepts every format the system issues:
+
+       14 digits  32070410180902        parcel
+       17 digits  32070410180902 003    parcel + floor
+       20 digits  32070410180902 003 012  parcel + floor + unit
+       hyphenated IND-TN-001-CHE-F03-U301
+
+     Resolution order (cheapest first):
+       1. a building already drawn on the map
+       2. the backend registry (/api/v1/parcels/{ulpin})
+       3. the backend search index, which also matches partial ULPINs
+
+     The hyphenated form is a presentation format that carries no coordinates,
+     so it can only be resolved via the registry.                          */
+
+  const ULPIN_NUMERIC_RE = /^\d{14}(\d{3})?(\d{3})?$/;
+  const ULPIN_CUSTOM_RE = /^[A-Z]{3}-[A-Z]{2}-[0-9]{3}-[A-Z]{3}-[A-Z][0-9]{2}-U[0-9]{3}$/i;
+
+  /** True if `q` looks like any supported ULPIN, so the caller can route it. */
+  function looksLikeUlpin(q) {
+    const s = String(q).trim();
+    return ULPIN_NUMERIC_RE.test(s) || ULPIN_CUSTOM_RE.test(s);
+  }
+
+  /** Split a ULPIN into { base, floor, unit, custom } without throwing. */
+  function parseUlpin(raw) {
+    const s = String(raw).trim();
+    if (ULPIN_CUSTOM_RE.test(s)) {
+      const p = s.toUpperCase().split('-');
+      return {
+        custom: true, canonical: s.toUpperCase(), base: null,
+        floor: parseInt(p[4].slice(1), 10),
+        unit: parseInt(p[5].slice(1), 10),
+      };
+    }
+    if (!ULPIN_NUMERIC_RE.test(s)) return null;
+    return {
+      custom: false, canonical: s, base: s.slice(0, 14),
+      floor: s.length >= 17 ? parseInt(s.slice(14, 17), 10) : null,
+      unit: s.length === 20 ? parseInt(s.slice(17, 20), 10) : null,
+    };
+  }
+
+  /**
+   * Fly to the parcel identified by `raw` and select it.
+   * Returns { ok, reason } so the caller can report precisely what happened.
+   */
+  async function gotoUlpin(raw, { zoom = 18 } = {}) {
+    const parsed = parseUlpin(raw);
+    if (!parsed) return { ok: false, reason: 'format' };
+
+    // -- 1. Already on the map: no network needed. ------------------------
+    if (parsed.base) {
+      const layer = layerIndex.get(parsed.base);
+      if (layer) {
+        focusFeature(layer._feature, layer, zoom, parsed);
+        return { ok: true, reason: 'onmap', ulpin: parsed.base };
+      }
+    }
+
+    if (!API.isOnline) return { ok: false, reason: 'offline', parsed };
+
+    // -- 2. Exact registry lookup. ----------------------------------------
+    if (parsed.base) {
+      try {
+        const r = await API.getParcel(parsed.base);
+        const f = r.data || r;
+        if (f && f.geometry) {
+          addFeature(f);
+          focusFeature(f, layerIndex.get(parsed.base), zoom, parsed);
+          return { ok: true, reason: 'registry', ulpin: parsed.base };
+        }
+      } catch (_) { /* fall through to search */ }
+    }
+
+    // -- 3. Search index: handles the hyphenated form and partial codes. ---
+    try {
+      const r = await API.search(parsed.canonical);
+      const feats = (r.data && r.data.features) || [];
+      if (feats.length) {
+        feats.forEach(addFeature);
+        const f = feats[0];
+        focusFeature(f, layerIndex.get(String(f.properties.ulpin)), zoom, parsed);
+        return { ok: true, reason: 'search', ulpin: f.properties.ulpin, count: feats.length };
+      }
+    } catch (_) { /* fall through */ }
+
+    return { ok: false, reason: 'notfound', parsed };
+  }
+
+  /** Draw one feature onto the map, reusing the existing layer if present. */
+  function addFeature(f) {
+    const id = String(f.properties.ulpin);
+    if (layerIndex.has(id)) return layerIndex.get(id);
+
+    const coords = f.geometry.coordinates[0].map(([lon, lat]) => [lat, lon]);
+    const layer = L.polygon(coords, styleFor(f));
+    layer._feature = f;
+    layer.on('click', () => select(f, layer));
+    layer.bindTooltip(`${f.properties.name} · ${f.properties.total_floors} fl`,
+      { className: 'parcel-tip', sticky: true, direction: 'top' });
+    parcelLayer.addLayer(layer);
+    layerIndex.set(id, layer);
+    if (!buildings.some(b => String(b.properties.ulpin) === id)) buildings.push(f);
+    return layer;
+  }
+
+  /** Fly to a feature, select it, and honour any floor/unit digits. */
+  function focusFeature(f, layer, zoom, parsed) {
+    const { centroid_lat: lat, centroid_lon: lon } = f.properties;
+    if (typeof lat === 'number' && typeof lon === 'number') {
+      map.flyTo([lat, lon], zoom, { duration: 1.2 });
+    } else if (layer) {
+      map.flyToBounds(layer.getBounds(), { maxZoom: zoom, duration: 1.2 });
+    }
+    if (layer) select(f, layer); else { selected = f; Details.show(f); }
+
+    // Briefly pulse the outline so the target is obvious after the flight.
+    if (layer) {
+      let n = 0;
+      const base = styleFor(f);
+      const timer = setInterval(() => {
+        layer.setStyle(n % 2 ? { color: '#ffffff', weight: 3 }
+                             : { color: '#facc15', weight: 5 });
+        if (++n > 5) { clearInterval(timer); if (layer !== selectedLayer) layer.setStyle(base); }
+      }, 260);
+    }
+
+    // A 17/20-digit ULPIN names a specific floor: open it once details render.
+    if (parsed && parsed.floor != null && typeof Details.focusFloor === 'function') {
+      setTimeout(() => { try { Details.focusFloor(parsed.floor); } catch (_) {} }, 700);
+    }
   }
 
   /* -------------------------------- Search ----------------------------- */
@@ -394,6 +532,7 @@ const MapApp = (() => {
 
   return {
     init, generateForRadius, updateRadiusPreview, searchLocation,
+    gotoUlpin, looksLikeUlpin, parseUlpin, addFeature,
     exportGeoJSON, exportCSV, calcFloors, estimateHeight, ringMetrics,
     get map() { return map; },
     get selected() { return selected; },
