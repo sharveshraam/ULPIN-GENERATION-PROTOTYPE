@@ -360,7 +360,7 @@
             });
             if (health) {
                 pill.className = 'hidden md:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-live';
-                pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-current"></span> API live · ${health.parcels} stored`;
+                pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-current"></span> API live${health.parcels == null ? '' : ` · ${health.parcels} stored`}`;
             } else {
                 const blocked = API.lastFailure === 'blocked';
                 pill.className = 'hidden md:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-off';

@@ -35,11 +35,27 @@ const API = (() => {
   let online = false;
   let lastFailure = null;
 
-  // Health-probe paths, tried in order. All three return the identical
-  // payload; the aliases exist purely so a filter list matching the common
-  // "/health" token cannot take the status check down with it.
-  const HEALTH_PATHS = ['/health', '/status', '/ulpin-status'];
+  // Health-probe paths, tried in order.
+  //
+  // "/health" is a token ad-block and tracking-prevention filter lists match,
+  // so it can be cancelled locally (ERR_BLOCKED_BY_CLIENT) even when the API
+  // is perfectly healthy. The rest are ordinary-looking paths returning the
+  // same information, so a list matching one token cannot take the status
+  // check down with it.
+  //
+  // "/" is last on purpose but matters most: it is the API root, it exists on
+  // every version of this backend ever deployed, and it needs no redeploy to
+  // start working. It reports liveness only - it has no database field - so
+  // it is a fallback, not a replacement.
+  const HEALTH_PATHS = ['/health', '/status', '/ulpin-status', '/'];
   let healthPath = HEALTH_PATHS[0];
+
+  /** Normalise a probe response: "/" returns the API banner, not a health doc. */
+  function asHealth(body, path) {
+    if (path !== '/') return body;
+    const d = (body && body.data) || {};
+    return { status: 'ok', version: d.version || '', database: 'unknown', parcels: null };
+  }
 
   const url = (path) => `${BASE}${path}`;
 
@@ -123,7 +139,7 @@ const API = (() => {
       for (const path of HEALTH_PATHS) {
         const started = Date.now();
         try {
-          const r = await request(path, {}, 8000);
+          const r = asHealth(await request(path, {}, 8000), path);
           online = r.status === 'ok';
           healthPath = path;
           return r;
@@ -134,10 +150,13 @@ const API = (() => {
           // hangs. Use that to tell them apart, because retrying for 75s
           // cannot help a blocked request and reporting "offline" sends
           // people to debug a server that is perfectly fine.
-          if (!isLikelyBlocked(err, Date.now() - started)) { blockedAll = false; break; }
+          if (!isLikelyBlocked(err, Date.now() - started)) blockedAll = false;
+          // Keep trying the remaining paths either way: a 404 just means this
+          // deployment predates that alias, and a timeout on one path says
+          // nothing about whether another is blocked.
         }
       }
-      // Every alias was cancelled locally: this is definitely a client-side
+      // Every path was cancelled locally: this is definitely a client-side
       // blocker, and no amount of retrying will change that.
       if (blockedAll) { lastFailure = 'blocked'; online = false; return null; }
 
@@ -150,25 +169,33 @@ const API = (() => {
       const deadline = Date.now() + 75000;
       let blockedStreak = 0;
       while (Date.now() < deadline) {
-        const attempt = Date.now();
-        try {
-          const r = await request(healthPath, {}, 20000);
-          online = r.status === 'ok';
-          return r;
-        } catch (err) {
-          // Consistent instant rejections mean a client-side blocker, not a
-          // cold start. Bail out early rather than spinning for the full budget.
-          if (isLikelyBlocked(err, Date.now() - attempt)) {
-            if (++blockedStreak >= 3) {
-              lastFailure = 'blocked';
-              online = false;
-              return null;
-            }
-          } else {
-            blockedStreak = 0;
+        // Re-probe every path, not just the first. A waking host may answer
+        // one path before another, and one of these may be the only one the
+        // browser is willing to send.
+        let sawReal = false;
+        for (const path of HEALTH_PATHS) {
+          const attempt = Date.now();
+          try {
+            const r = asHealth(await request(path, {}, 20000), path);
+            online = r.status === 'ok';
+            healthPath = path;
+            return r;
+          } catch (err) {
+            if (!isLikelyBlocked(err, Date.now() - attempt)) sawReal = true;
           }
-          await new Promise(res => setTimeout(res, 2500));
         }
+        // Consistent instant rejections across every path mean a client-side
+        // blocker, not a cold start. Bail out rather than spin for the budget.
+        if (!sawReal) {
+          if (++blockedStreak >= 2) {
+            lastFailure = 'blocked';
+            online = false;
+            return null;
+          }
+        } else {
+          blockedStreak = 0;
+        }
+        await new Promise(res => setTimeout(res, 2500));
       }
       lastFailure = 'unreachable';
       online = false;
