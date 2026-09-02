@@ -7,6 +7,7 @@ Interactive docs: http://127.0.0.1:8000/docs
 from __future__ import annotations
 
 import logging
+import os as _os
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
@@ -548,6 +549,39 @@ async def search(
                 ]}
 
     raise HTTPException(400, "Provide one of: q, address, or lat+lon")
+
+
+# --------------------------------------------------------------------------- #
+# Static frontend (optional, and mounted LAST so it can never shadow a route)
+#
+# Serving the UI from the same origin as the API turns every request into a
+# first-party one. That matters because browser tracking prevention and many
+# privacy extensions block by cross-site *relationship*, not by domain: a call
+# from github.io to onrender.com is third-party and gets cancelled with
+# ERR_BLOCKED_BY_CLIENT, while the identical call from a page already on
+# onrender.com is first-party and passes. Same-origin also means no CORS
+# preflight at all.
+#
+# GitHub Pages keeps working exactly as before - this is an addition, not a
+# replacement. js/config.js resolves to same-origin automatically when the
+# page is not on a known static host, so no build-time switch is needed.
+# --------------------------------------------------------------------------- #
+# Repository root, which holds index.html, map.html, js/ and the stylesheets.
+_FRONTEND_DIR = _os.path.dirname(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+)
+
+if _os.path.isfile(_os.path.join(_FRONTEND_DIR, "index.html")):
+    from fastapi.staticfiles import StaticFiles
+
+    # Mounted at /app rather than / so the JSON banner at "/" stays put: it is
+    # both the documented API root and the last-resort health probe. html=True
+    # makes /app/ serve index.html. All asset paths in the pages are relative,
+    # so they resolve correctly under the prefix.
+    app.mount("/app", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")
+    logger.info("Serving frontend at /app from %s", _FRONTEND_DIR)
+else:  # pragma: no cover - only when deployed without the static files
+    logger.info("No frontend found at %s; running API-only", _FRONTEND_DIR)
 
 
 # --------------------------------------------------------------------------- #

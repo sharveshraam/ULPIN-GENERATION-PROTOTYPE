@@ -599,3 +599,35 @@ def test_health_aliases_are_hidden_from_schema():
 def test_health_aliases_exempt_from_rate_limit():
     from app.main import _EXEMPT
     assert {"/health", "/status", "/ulpin-status"} <= _EXEMPT
+
+
+# --------------------------------------------------------------------------- #
+# Same-origin frontend
+#
+# Browser tracking prevention blocks by cross-site relationship, not by
+# domain: github.io -> onrender.com is third-party and gets cancelled, while
+# the identical request from a page already on onrender.com is first-party
+# and passes. Serving the UI from the API origin sidesteps that entirely.
+# --------------------------------------------------------------------------- #
+def test_frontend_is_served_at_app():
+    res = client.get("/app/")
+    assert res.status_code == 200
+    assert "text/html" in res.headers["content-type"]
+
+
+@pytest.mark.parametrize("asset", ["map.html", "js/api.js", "js/config.js", "styles.css"])
+def test_frontend_assets_are_served(asset):
+    assert client.get(f"/app/{asset}").status_code == 200
+
+
+def test_static_mount_does_not_shadow_api_routes():
+    """The mount is added last; every API path must still resolve."""
+    assert client.get("/health").json()["status"] == "ok"
+    assert client.get("/api/v1/parcels?limit=1").json()["success"] is True
+
+
+def test_root_still_returns_json_banner_not_html():
+    """'/' is the documented API root and the last-resort health probe."""
+    res = client.get("/")
+    assert res.headers["content-type"].startswith("application/json")
+    assert res.json()["data"]["name"]

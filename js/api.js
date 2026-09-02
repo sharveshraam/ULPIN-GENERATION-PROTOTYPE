@@ -16,6 +16,18 @@ const API = (() => {
   function resolveBase() {
     let configured = (typeof window !== 'undefined' && window.API_BASE_URL) || '';
     configured = configured.trim().replace(/\/+$/, '');
+
+    // When the page is already served by the backend, always talk to our own
+    // origin and ignore the configured URL. Beyond being redundant, an
+    // absolute cross-origin URL here would be a third-party request, which is
+    // exactly what tracking prevention cancels - the reason this same-origin
+    // deployment exists. Same origin also skips CORS entirely.
+    if (typeof location !== 'undefined' && configured) {
+      try {
+        if (new URL(configured).origin === location.origin) return '';
+      } catch (_) { /* not an absolute URL; fall through */ }
+    }
+
     if (configured) {
       // A page served over https cannot call an http API - the browser blocks
       // it as mixed content. Upgrade rather than fail silently. localhost is

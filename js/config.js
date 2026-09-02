@@ -16,6 +16,14 @@
  * committed here is exactly what the deployed site talks to.
  *
  * The value is a public API endpoint, not a secret — safe to commit.
+ *
+ * NOTE: this URL is ignored when the page is already served by the backend
+ * (https://ulpin-generation-prototype.onrender.com/app/). There the client
+ * uses relative URLs, so requests are first-party. That matters because
+ * browser tracking prevention and privacy extensions block on the cross-site
+ * relationship — a call from github.io to onrender.com is third-party and
+ * gets cancelled before it is sent, while the same call from a page on
+ * onrender.com is not. Use /app/ if an ad blocker is interfering.
  */
 const API_BASE_URL = 'https://ulpin-generation-prototype.onrender.com';
 
