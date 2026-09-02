@@ -1,0 +1,22 @@
+# Root-level requirements for Render's native Python runtime.
+#
+# Derived by AST-inspecting every project .py file under backend/ for
+# third-party imports. Only these are used at runtime:
+#   fastapi, uvicorn (server), sqlalchemy, shapely, pydantic, httpx
+#
+# Deliberately NOT included:
+#   pyproj              - geometry_processor.py implements a local
+#                         equirectangular projection specifically to avoid it
+#   python-dotenv       - config.py reads os.environ directly; Render injects
+#                         environment variables into the process
+#   pydantic-settings   - not imported; plain helpers are used instead
+#   requests            - all HTTP is async via httpx
+#   database drivers    - SQLite ships with Python's stdlib (sqlite3)
+#   pytest              - test-only, see backend/requirements.txt
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+SQLAlchemy==2.0.52
+shapely==2.1.2
+pydantic==2.13.5
+httpx==0.28.1

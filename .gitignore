@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# Environment / secrets
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.pyc
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---------------------------------------------------------------------------
+# Local database
+#
+# ulpin_database.db is a runtime artifact created on first start (it was empty
+# — 0 parcels/floors/units — when checked, so it is NOT seed data). It has
+# never been tracked by git. Nothing is deleted automatically; if you later add
+# curated demo data and want it in the repo, force-add it:
+#     git add -f backend/ulpin_database.db
+# ---------------------------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+
+# ---------------------------------------------------------------------------
+# OS / editor
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ---------------------------------------------------------------------------
+# Node (only if tooling is added later)
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+build/
