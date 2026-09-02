@@ -29,10 +29,20 @@ const API = (() => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
+      // Only send Content-Type when there is a body. On a GET it is a
+      // non-simple header that forces a CORS preflight for no reason, and a
+      // backend whose ALLOWED_ORIGINS does not list this exact origin will
+      // reject that OPTIONS with a 400 - even though the plain GET succeeds.
+      // That combination looks like "backend offline" while /health opens
+      // perfectly in a browser tab.
+      const headers = { ...(options.headers || {}) };
+      if (options.body != null && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+      }
       const res = await fetch(url(path), {
         ...options,
         signal: ctrl.signal,
-        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        headers,
       });
       const text = await res.text();
       let body;
