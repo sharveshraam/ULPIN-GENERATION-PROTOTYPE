@@ -1,22 +1,21 @@
 /**
- * Deployment configuration.
+ * ============================================================
+ *  BACKEND ENDPOINT — the only place the API URL is configured
+ * ============================================================
  *
- * ============================================================
- *  SET YOUR DEPLOYED BACKEND URL HERE
- * ============================================================
- * Paste the Render URL of your API below, with NO trailing slash, e.g.
+ * Paste your deployed backend URL here, with NO trailing slash:
  *
  *   const API_BASE_URL = 'https://ulpin-api.onrender.com';
  *
- * Leave it as an empty string to keep the old behaviour (localhost during
- * local development, same-origin otherwise).
+ * Leave it as an empty string to fall back to:
+ *   - http://127.0.0.1:8000  when opened on localhost (local development)
+ *   - same origin            anywhere else
  *
- * This value is only a DEFAULT. It is overridden, in priority order, by:
- *   1. an ?api=<url> query parameter
- *   2. a URL previously saved from the in-app "Connect API" dialog
- *      (stored in localStorage under 'ulpin_api_base')
+ * This is the single source of truth. There is no query-parameter override
+ * and no in-app dialog: the endpoint is fixed in code, so whatever is
+ * committed here is exactly what the deployed site talks to.
  *
- * Nothing here is secret: it is a public API endpoint, safe to commit.
+ * The value is a public API endpoint, not a secret — safe to commit.
  */
 const API_BASE_URL = '';
 

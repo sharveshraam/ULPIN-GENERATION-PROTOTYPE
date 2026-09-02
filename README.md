@@ -233,28 +233,21 @@ SQLite on Cloud Run is wiped on every cold start.
 **Frontend → GitHub Pages**
 
 Enable Pages on the repo (Settings → Pages → deploy from the branch root), then
-tell the frontend where the backend lives. There are three ways, checked in this
-order — the first one found wins:
+set the backend URL in **`js/config.js`** — the single place it is configured:
 
-1. **Query parameter** — good for a quick test, nothing to commit:
-   `https://<user>.github.io/<repo>/map.html?api=https://ulpin-api.onrender.com`
-   The value is remembered afterwards.
+```js
+const API_BASE_URL = 'https://ulpin-api.onrender.com';   // no trailing slash
+```
 
-2. **The "Connect API" dialog** — click the status pill in the header, paste the
-   URL, press *Test & save*. It calls `/health` first and reports a clear error
-   if the service is asleep, the URL is wrong, or CORS is blocking the origin.
-   Saved in `localStorage`, so it survives reloads but only on that browser.
+Commit it and Pages picks it up on the next deploy. There is deliberately no
+`?api=` query override and no in-app dialog: the endpoint lives in code, so what
+is committed is exactly what the deployed site talks to. `API.base` is read-only
+at runtime.
 
-3. **`js/config.js`** — the permanent option, and the one to use so that *every*
-   visitor gets a working site:
+Leaving it as `''` falls back to `http://127.0.0.1:8000` on localhost (for local
+development) and to same-origin anywhere else.
 
-   ```js
-   const API_BASE_URL = 'https://ulpin-api.onrender.com';   // no trailing slash
-   ```
-
-   Commit it and Pages picks it up on the next deploy.
-
-Whichever you choose, the backend must allow the Pages origin. On Render set:
+The backend must allow the Pages origin. On Render set:
 
 ```
 ALLOWED_ORIGINS = https://<user>.github.io
