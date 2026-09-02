@@ -362,10 +362,16 @@
                 pill.className = 'hidden md:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-live';
                 pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-current"></span> API live · ${health.parcels} stored`;
             } else {
+                const blocked = API.lastFailure === 'blocked';
                 pill.className = 'hidden md:inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full pill-off';
-                pill.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-current"></span> Browser mode';
-                pill.title = 'Backend unreachable — floors and units are computed in the browser.';
-                UI.toast('Backend offline — running in browser mode. Everything still works.', 'info', 5500);
+                pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-current"></span> ${blocked ? 'API blocked' : 'Browser mode'}`;
+                pill.title = blocked
+                    ? 'A browser extension or tracking prevention cancelled the request before it was sent. The server is fine.'
+                    : 'Backend unreachable — floors and units are computed in the browser.';
+                UI.toast(blocked
+                    ? 'An ad blocker or tracking prevention is blocking the API. Allow this site, or try a private window. Everything still works meanwhile.'
+                    : 'Backend offline — running in browser mode. Everything still works.',
+                    'info', blocked ? 8000 : 5500);
             }
         })();
     </script>

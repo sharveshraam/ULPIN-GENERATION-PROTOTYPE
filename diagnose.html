@@ -101,14 +101,19 @@
             //     which separates "server unreachable" from "server blocked by CORS".
             const r4 = row('Server is reachable at all');
             let reachable = false;
+            const t0 = Date.now();
             try {
                 await fetch(BASE + '/health', { mode: 'no-cors', cache: 'no-store' });
                 reachable = true;
                 r4.set('ok', 'The server responded. (Opaque response — this check ignores CORS by design.)');
             } catch (e) {
-                r4.set('fail', `Could not reach the server at all: <code>${e.message}</code>.
-                                Either it is asleep/down, or the URL is wrong.`);
-                cause = cause || 'unreachable';
+                // A no-cors request cannot fail for CORS reasons, so an instant
+                // rejection here means something local cancelled it.
+                const instant = (Date.now() - t0) < 1500;
+                r4.set('fail', `Could not reach the server: <code>${e.message}</code>${instant
+                    ? '<br>It failed <b>instantly</b>, which is the signature of a browser extension or tracking prevention, not a slow server.'
+                    : '. Either it is asleep/down, or the URL is wrong.'}`);
+                cause = cause || (instant ? 'blocked' : 'unreachable');
             }
 
             // 5 — the real CORS-enforced request the app performs
@@ -176,6 +181,19 @@
                           <code>*</code>) or set it to exactly <code>${location.origin}</code> —
                           origin only, no path, no trailing slash.</li>
                       <li><b>Manual Deploy → Deploy latest commit</b>, then re-run this page.</li>
+                    </ol>`,
+                blocked: `<h2>Cause: a browser extension or tracking prevention is blocking the request</h2>
+                    <div class="rd">The request was cancelled <b>before it left the browser</b>
+                    (<code>ERR_BLOCKED_BY_CLIENT</code>), so the server never saw it.
+                    Your backend is almost certainly fine. Ad blockers and strict privacy modes often
+                    flag unfamiliar API domains like <code>*.onrender.com</code>.</div>
+                    <ol>
+                      <li>Open this page in a <b>private/incognito window</b> with extensions disabled.
+                          If it passes there, an extension is the cause.</li>
+                      <li>Disable uBlock Origin / AdBlock / Privacy Badger / Ghostery for this site,
+                          or allowlist <code>${BASE}</code>.</li>
+                      <li>Edge: <b>Settings → Privacy, search, and services → Tracking prevention</b>.
+                          Set it to <b>Basic</b>, or add this site under <b>Exceptions</b>.</li>
                     </ol>`,
                 unreachable: `<h2>Cause: the server could not be reached</h2>
                     <ol>

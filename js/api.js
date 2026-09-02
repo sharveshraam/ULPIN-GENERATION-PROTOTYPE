@@ -22,8 +22,25 @@ const API = (() => {
 
   let BASE = resolveBase();
   let online = false;
+  let lastFailure = null;
 
   const url = (path) => `${BASE}${path}`;
+
+  /**
+   * Distinguish "a browser extension cancelled this" from "the server is slow
+   * or down". Blocked requests reject as a bare TypeError ("Failed to fetch")
+   * with no HTTP status, and do so far faster than any real network round
+   * trip. An aborted timeout is explicitly excluded - that one means slow.
+   *
+   * @param {Error} err  the rejection from fetch()
+   * @param {number} ms  how long the attempt took
+   */
+  function isLikelyBlocked(err, ms) {
+    if (!err || err.name === 'AbortError') return false;   // timed out => slow, not blocked
+    const networkLevel = err instanceof TypeError ||
+      /failed to fetch|networkerror|load failed|blocked/i.test(err.message || '');
+    return networkLevel && ms < 1500;
+  }
 
   async function request(path, options = {}, timeoutMs = 120000) {
     const ctrl = new AbortController();
@@ -77,32 +94,68 @@ const API = (() => {
      *                            so the UI can say "waking backend…"
      */
     async checkHealth(onWaking) {
+      lastFailure = null;
+
       // Fast path: a warm backend answers well inside this.
+      const started = Date.now();
       try {
         const r = await request('/health', {}, 8000);
         online = r.status === 'ok';
         return r;
-      } catch (_) { /* fall through to the slow path */ }
+      } catch (err) {
+        // A request killed by an ad blocker, privacy extension or tracking
+        // prevention never reaches the network: it rejects with a TypeError
+        // almost instantly (ERR_BLOCKED_BY_CLIENT). A sleeping host behaves
+        // the opposite way - it hangs. Use that to tell them apart, because
+        // retrying for 75s cannot help a blocked request and reporting
+        // "offline" sends people to debug a server that is perfectly fine.
+        if (isLikelyBlocked(err, Date.now() - started)) {
+          lastFailure = 'blocked';
+          online = false;
+          return null;
+        }
+      }
 
       // Nothing to wake if no backend is configured at all.
-      if (!BASE) { online = false; return null; }
+      if (!BASE) { lastFailure = 'unconfigured'; online = false; return null; }
 
       if (typeof onWaking === 'function') { try { onWaking(); } catch (_) {} }
 
       // Slow path: cold start. Poll until the service answers or we give up.
       const deadline = Date.now() + 75000;
+      let blockedStreak = 0;
       while (Date.now() < deadline) {
+        const attempt = Date.now();
         try {
           const r = await request('/health', {}, 20000);
           online = r.status === 'ok';
           return r;
-        } catch (_) {
+        } catch (err) {
+          // Consistent instant rejections mean a client-side blocker, not a
+          // cold start. Bail out early rather than spinning for the full budget.
+          if (isLikelyBlocked(err, Date.now() - attempt)) {
+            if (++blockedStreak >= 3) {
+              lastFailure = 'blocked';
+              online = false;
+              return null;
+            }
+          } else {
+            blockedStreak = 0;
+          }
           await new Promise(res => setTimeout(res, 2500));
         }
       }
+      lastFailure = 'unreachable';
       online = false;
       return null;
     },
+
+    /**
+     * Why the last checkHealth() failed: 'blocked' (an extension or tracking
+     * prevention cancelled the request before it left the browser),
+     * 'unreachable', 'unconfigured', or null when it succeeded.
+     */
+    get lastFailure() { return lastFailure; },
 
     generateUlpin: (payload) =>
       request('/api/v1/generate-ulpin', { method: 'POST', body: JSON.stringify(payload) }),
