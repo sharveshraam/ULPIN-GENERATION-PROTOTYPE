@@ -1,0 +1,12 @@
+{
+  "name": "ulpin-css-build",
+  "private": true,
+  "version": "1.0.0",
+  "devDependencies": {
+    "tailwindcss": "^3.4.19"
+  },
+  "description": "Compiles the static Tailwind stylesheet served by GitHub Pages.",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i input.css -o ../tailwind.css --minify"
+  }
+}
