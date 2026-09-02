@@ -24,6 +24,12 @@
         <div class="blob b2"></div>
         <div class="blob b3"></div>
     </div>
+
+    <!-- Rotating background globe. Decorative only: it sits behind every
+         section, ignores pointer events, and degrades to the aurora above
+         if WebGL or the three.js CDN is unavailable. -->
+    <div id="globe" class="globe-bg" aria-hidden="true"></div>
+
     <div class="grid-veil"></div>
 
     <!-- ============================== NAV ============================== -->
@@ -59,11 +65,11 @@
     <header class="relative z-10 max-w-7xl mx-auto px-6 pt-16 pb-20">
         <div class="grid lg:grid-cols-[1.05fr_.95fr] gap-14 items-center">
             <div>
-                <div class="inline-flex items-center gap-2 glass-soft rounded-full px-3.5 py-1.5 text-xs text-indigo-300 mb-6 rise"
+                <div class="inline-flex items-center gap-2 glass-soft rounded-full px-3.5 py-1.5 text-xs text-teal-300 mb-6 rise"
                     style="animation-delay:.05s">
                     <span class="relative flex h-2 w-2">
-                        <span class="animate-ping absolute h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                        <span class="relative rounded-full h-2 w-2 bg-indigo-400"></span>
+                        <span class="animate-ping absolute h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                        <span class="relative rounded-full h-2 w-2 bg-teal-400"></span>
                     </span>
                     Live OpenStreetMap + satellite pipeline
                 </div>
@@ -109,7 +115,7 @@
             <!-- Building illustration -->
             <div class="relative rise" style="animation-delay:.26s">
                 <div class="glass rounded-3xl p-7 relative overflow-hidden float-slow">
-                    <div class="absolute -top-24 -right-24 w-64 h-64 rounded-full bg-indigo-500/25 blur-3xl"></div>
+                    <div class="absolute -top-24 -right-24 w-64 h-64 rounded-full bg-teal-500/25 blur-3xl"></div>
 
                     <div class="flex items-center justify-between mb-5 relative">
                         <span class="text-[10px] uppercase tracking-[.16em] text-slate-500 font-semibold">Sample Record</span>
@@ -121,7 +127,7 @@
                     </div>
 
                     <div class="font-mono text-[27px] md:text-[31px] font-semibold tracking-[.05em] text-center py-3 relative">
-                        <span class="text-sky-300">32</span><span class="text-indigo-300">07</span><span
+                        <span class="text-sky-300">32</span><span class="text-teal-300">07</span><span
                             class="text-teal-300">041</span><span class="text-amber-300">018</span><span
                             class="text-rose-300">0902</span>
                     </div>
@@ -133,8 +139,8 @@
                     <div class="flex items-end justify-center gap-1.5 h-28 mb-6 relative">
                         <div class="w-7 rounded-t bg-gradient-to-t from-cyan-500/70 to-cyan-300/70" style="height:32%"></div>
                         <div class="w-7 rounded-t bg-gradient-to-t from-sky-500/70 to-sky-300/70" style="height:54%"></div>
-                        <div class="w-7 rounded-t bg-gradient-to-t from-indigo-500/80 to-indigo-300/80" style="height:100%"></div>
-                        <div class="w-7 rounded-t bg-gradient-to-t from-violet-500/70 to-violet-300/70" style="height:72%"></div>
+                        <div class="w-7 rounded-t bg-gradient-to-t from-teal-500/80 to-teal-300/80" style="height:100%"></div>
+                        <div class="w-7 rounded-t bg-gradient-to-t from-cyan-500/70 to-cyan-300/70" style="height:72%"></div>
                         <div class="w-7 rounded-t bg-gradient-to-t from-rose-500/70 to-rose-300/70" style="height:44%"></div>
                     </div>
 
@@ -149,7 +155,7 @@
                         </div>
                         <div class="glass-soft rounded-lg px-3.5 py-2.5 flex justify-between text-xs">
                             <span class="text-slate-500">Unit ULPIN</span>
-                            <span class="font-mono text-indigo-300">…0902&nbsp;012&nbsp;004</span>
+                            <span class="font-mono text-teal-300">…0902&nbsp;012&nbsp;004</span>
                         </div>
                     </div>
                 </div>
@@ -168,7 +174,7 @@
 
         <div class="grid md:grid-cols-3 gap-5">
             <div class="feature-card glass rounded-2xl p-7" data-reveal data-reveal-delay="0">
-                <div class="w-11 h-11 rounded-xl bg-indigo-500/15 text-indigo-300 grid place-items-center mb-5">
+                <div class="w-11 h-11 rounded-xl bg-teal-500/15 text-teal-300 grid place-items-center mb-5">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18M15 3v18M3 9h18M3 15h18" />
                     </svg>
@@ -181,7 +187,7 @@
             </div>
 
             <div class="feature-card glass rounded-2xl p-7" data-reveal data-reveal-delay="90">
-                <div class="w-11 h-11 rounded-xl bg-violet-500/15 text-violet-300 grid place-items-center mb-5">
+                <div class="w-11 h-11 rounded-xl bg-cyan-500/15 text-cyan-300 grid place-items-center mb-5">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 2 3 7v10l9 5 9-5V7z" /><path d="M12 22V12M3 7l9 5 9-5" />
                     </svg>
@@ -213,7 +219,7 @@
         <div class="glass rounded-3xl overflow-hidden" data-reveal>
             <div class="p-8 md:p-10 grid lg:grid-cols-[1fr_1.1fr] gap-10 items-center">
                 <div>
-                    <span class="text-[10px] uppercase tracking-[.18em] text-indigo-400 font-semibold">Live demo</span>
+                    <span class="text-[10px] uppercase tracking-[.18em] text-teal-400 font-semibold">Live demo</span>
                     <h2 class="text-2xl md:text-3xl font-bold mt-3 mb-4">Try it on a real neighbourhood</h2>
                     <p class="text-slate-400 text-sm leading-relaxed mb-6">
                         The map console pulls genuine OSM footprints, colour-codes them by height, and generates a
@@ -261,7 +267,7 @@
                         </div>
                         <div class="mt-4 pt-4 border-t border-white/10 text-[10px] text-slate-500">
                             Unit ULPIN example
-                            <div class="font-mono text-indigo-300 mt-1 text-xs">99010010010001 · 163 · 012</div>
+                            <div class="font-mono text-teal-300 mt-1 text-xs">99010010010001 · 163 · 012</div>
                         </div>
                     </div>
                 </div>
@@ -279,7 +285,7 @@
         <div class="grid md:grid-cols-3 gap-5">
             <div class="glass rounded-2xl p-7 relative overflow-hidden" data-reveal>
                 <span class="absolute -top-4 -right-2 text-[100px] font-black text-white/[.03] leading-none select-none">1</span>
-                <div class="w-10 h-10 rounded-xl bg-indigo-500/15 text-indigo-300 grid place-items-center mb-4 font-bold">1</div>
+                <div class="w-10 h-10 rounded-xl bg-teal-500/15 text-teal-300 grid place-items-center mb-4 font-bold">1</div>
                 <h3 class="font-semibold mb-2">Locate</h3>
                 <p class="text-sm text-slate-400 leading-relaxed">
                     Search any place through Nominatim, or drop the crosshair yourself. Choose a scan radius and
@@ -288,7 +294,7 @@
             </div>
             <div class="glass rounded-2xl p-7 relative overflow-hidden" data-reveal data-reveal-delay="90">
                 <span class="absolute -top-4 -right-2 text-[100px] font-black text-white/[.03] leading-none select-none">2</span>
-                <div class="w-10 h-10 rounded-xl bg-violet-500/15 text-violet-300 grid place-items-center mb-4 font-bold">2</div>
+                <div class="w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-300 grid place-items-center mb-4 font-bold">2</div>
                 <h3 class="font-semibold mb-2">Identify</h3>
                 <p class="text-sm text-slate-400 leading-relaxed">
                     Overpass returns every building footprint with its real tags. Shapely computes the true area and
@@ -319,8 +325,8 @@
                     <div class="font-mono text-xl text-sky-300">2</div>
                     <div class="text-[11px] text-slate-400 mt-1">State code</div>
                 </div>
-                <div class="glass-soft rounded-xl p-4 border-l-2 border-indigo-400">
-                    <div class="font-mono text-xl text-indigo-300">2</div>
+                <div class="glass-soft rounded-xl p-4 border-l-2 border-teal-400">
+                    <div class="font-mono text-xl text-teal-300">2</div>
                     <div class="text-[11px] text-slate-400 mt-1">District code</div>
                 </div>
                 <div class="glass-soft rounded-xl p-4 border-l-2 border-teal-400">
@@ -345,7 +351,7 @@
                 </div>
                 <div class="glass-soft rounded-xl p-5">
                     <div class="text-[10px] uppercase tracking-widest text-slate-500 mb-2">Floor</div>
-                    <div class="font-mono text-base text-indigo-300 mb-1">17 digits</div>
+                    <div class="font-mono text-base text-teal-300 mb-1">17 digits</div>
                     <p class="text-slate-400 text-xs">Parcel + 3-digit storey number, supporting up to 250 floors.</p>
                 </div>
                 <div class="glass-soft rounded-xl p-5">
@@ -389,11 +395,21 @@
 
     <div id="toasts" class="fixed top-20 left-1/2 -translate-x-1/2 z-[80] space-y-2 w-[min(92vw,430px)]"></div>
 
+    <!-- three.js r0.128.0 for the background globe. Pinned to match map.html:
+         r148+ removed examples/js/ and r150+ removed build/three.min.js.
+         Loaded before globe.js, which needs the THREE global. -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+
     <script src="js/config.js"></script>
     <script src="js/api.js"></script>
     <script src="js/ui.js"></script>
+    <script src="js/globe.js"></script>
     <script>
         UI.initScrollReveal();
+
+        // Decorative background globe. Returns false (and changes nothing) if
+        // WebGL is unavailable or the three.js CDN was blocked.
+        Globe.init('globe');
 
         // Show whether the FastAPI backend is reachable, so the demo is honest
         // about whether results come from the server or the browser.

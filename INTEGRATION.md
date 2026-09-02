@@ -21,6 +21,7 @@ repo root
 │   ├── map.js          Leaflet map, ULPIN generation, ULPIN lookup
 │   ├── details.js      right-hand details panel (floors, units)
 │   ├── 3d-viewer.js    Three.js building viewer
+│   ├── globe.js        decorative rotating globe on the landing page
 │   └── ui.js           toasts, loader, modals
 ├── app/__init__.py     shim so `app.main:app` resolves from the repo root
 ├── backend/app/        the real FastAPI package
@@ -158,6 +159,8 @@ codes from a table instead.
 
 ## 5. Script load order (fragile — respect it)
 
+`map.html`:
+
 ```html
 <script src="js/config.js"></script>   <!-- must precede api.js -->
 <script src="js/api.js"></script>
@@ -167,9 +170,16 @@ codes from a table instead.
 <script src="js/map.js"></script>      <!-- last: depends on all of the above -->
 ```
 
+`index.html` additionally loads three.js then `js/globe.js` (which needs the
+`THREE` global) for the decorative background globe.
+
 `config.js` must load before `api.js`, because `api.js` resolves the base URL at
 module-evaluation time. Each file exposes a single global (`API`, `UI`,
-`MapApp`, `Details`, `Viewer3D`).
+`MapApp`, `Details`, `Viewer3D`, `Globe`).
+
+`js/globe.js` is purely decorative and dependency-free with respect to the
+backend. `Globe.init()` returns `false` and does nothing if WebGL is
+unavailable or the three.js CDN is blocked, so it can never break the page.
 
 ---
 

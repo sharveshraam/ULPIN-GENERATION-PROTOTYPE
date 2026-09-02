@@ -1,17 +1,22 @@
 /* ============================================================
    ULPIN Atlas — shared styles
-   Palette: indigo #6366f1 / purple #8b5cf6 on slate #0f172a
+   Palette: teal #14b8a6 / cyan #06b6d4 / sky #0ea5e9
+            on deep ocean-slate #060f18
+   A cartographic palette: cool, map-like, and distinct from the
+   generic indigo/violet SaaS look.
    ============================================================ */
 
 :root {
-  --primary: #6366f1;
-  --secondary: #8b5cf6;
-  --accent: #38bdf8;
-  --bg: #0b1020;
-  --bg-soft: #0f172a;
-  --border: rgba(148, 179, 226, 0.14);
-  --text: #e2e8f0;
-  --muted: #64748b;
+  --primary: #14b8a6;
+  --secondary: #06b6d4;
+  --accent: #22d3ee;
+  --highlight: #2dd4bf;
+  --bg: #060f18;
+  --bg-soft: #0b1a26;
+  --border: rgba(125, 211, 218, 0.15);
+  --text: #dbeafe;
+  --muted: #64809b;
+  --glow: rgba(20, 184, 166, .8);
 }
 
 * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
@@ -27,9 +32,9 @@ body {
 /* ---------------------------- Ambient bg ---------------------------- */
 .aurora { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
 .blob { position: absolute; border-radius: 50%; filter: blur(100px); opacity: .4; animation: drift 24s ease-in-out infinite; }
-.blob.b1 { width: 44vw; height: 44vw; background: #6366f1; top: -12vw; left: -8vw; }
-.blob.b2 { width: 38vw; height: 38vw; background: #8b5cf6; bottom: -14vw; right: -6vw; animation-delay: -8s; }
-.blob.b3 { width: 30vw; height: 30vw; background: #0ea5e9; top: 40%; left: 50%; animation-delay: -15s; opacity: .28; }
+.blob.b1 { width: 44vw; height: 44vw; background: #14b8a6; top: -12vw; left: -8vw; }
+.blob.b2 { width: 38vw; height: 38vw; background: #0891b2; bottom: -14vw; right: -6vw; animation-delay: -8s; }
+.blob.b3 { width: 30vw; height: 30vw; background: #0ea5e9; top: 40%; left: 50%; animation-delay: -15s; opacity: .3; }
 
 @keyframes drift {
   0%, 100% { transform: translate(0, 0) scale(1); }
@@ -37,11 +42,49 @@ body {
   66% { transform: translate(-4vw, -3vh) scale(.93); }
 }
 
+/* --------------------------- Background globe -----------------------
+   Fixed behind all content. Sits above the aurora blobs (z-index 0) but
+   below every section (which are z-10), and never intercepts clicks.
+   Masked at the edges so it dissolves into the page instead of ending
+   on a hard rectangle.                                                 */
+.globe-bg {
+  position: fixed;
+  top: 50%; left: 62%;
+  width: min(96vh, 900px); height: min(96vh, 900px);
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  pointer-events: none;
+  opacity: .78;
+  mask-image: radial-gradient(circle at 50% 50%, #000 55%, transparent 78%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 55%, transparent 78%);
+  animation: globe-in 1.6s cubic-bezier(.2, .8, .3, 1) both;
+}
+.globe-bg canvas { display: block; width: 100% !important; height: 100% !important; }
+
+@keyframes globe-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.9); }
+  to   { opacity: .78; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* On narrow screens the globe competes with the text: shrink, recentre
+   and fade it well back so copy stays readable. */
+@media (max-width: 900px) {
+  .globe-bg {
+    left: 50%; top: 42%;
+    width: min(115vw, 620px); height: min(115vw, 620px);
+    opacity: .34;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .globe-bg { animation: none; }
+}
+
 .grid-veil {
   position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background-image:
-    linear-gradient(rgba(99, 102, 241, .07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(99, 102, 241, .07) 1px, transparent 1px);
+    linear-gradient(rgba(20, 184, 166, .075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 184, 166, .075) 1px, transparent 1px);
   background-size: 56px 56px;
   mask-image: radial-gradient(ellipse 80% 55% at 50% 35%, #000 25%, transparent 100%);
   -webkit-mask-image: radial-gradient(ellipse 80% 55% at 50% 35%, #000 25%, transparent 100%);
@@ -49,12 +92,12 @@ body {
 
 /* ------------------------------ Glass ------------------------------- */
 .glass {
-  background: rgba(15, 23, 42, .72);
+  background: rgba(9, 24, 35, .74);
   backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
   border: 1px solid var(--border);
 }
-.glass-soft { background: rgba(255, 255, 255, .04); border: 1px solid rgba(148, 179, 226, .12); }
+.glass-soft { background: rgba(255, 255, 255, .04); border: 1px solid rgba(125, 211, 218, .13); }
 
 /* ----------------------------- Buttons ------------------------------ */
 .btn-primary {
@@ -62,10 +105,10 @@ body {
   display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
   background: linear-gradient(135deg, var(--primary), var(--secondary));
   color: #fff; font-weight: 600;
-  box-shadow: 0 10px 30px -10px rgba(99, 102, 241, .8);
+  box-shadow: 0 10px 30px -10px var(--glow);
   transition: transform .18s cubic-bezier(.2, .9, .3, 1.2), box-shadow .2s, filter .2s;
 }
-.btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 16px 38px -10px rgba(99, 102, 241, .95); filter: brightness(1.08); }
+.btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 16px 38px -10px rgba(20, 184, 166, .95); filter: brightness(1.08); }
 .btn-primary:active:not(:disabled) { transform: translateY(0) scale(.98); }
 .btn-primary::after {
   content: ''; position: absolute; top: 0; left: -120%; width: 60%; height: 100%;
@@ -90,7 +133,7 @@ body {
 @keyframes rise { to { opacity: 1; transform: none; } }
 
 .gradient-text {
-  background: linear-gradient(100deg, #a5b4fc 0%, #c4b5fd 45%, #7dd3fc 100%);
+  background: linear-gradient(100deg, #5eead4 0%, #67e8f9 45%, #7dd3fc 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 
@@ -136,7 +179,7 @@ body {
 /* ------------------------------- Map -------------------------------- */
 .leaflet-container { background: #05070f; font-family: 'Inter', sans-serif; }
 .leaflet-control-attribution { background: rgba(5, 7, 15, .75) !important; color: #64748b !important; font-size: 9px !important; }
-.leaflet-control-attribution a { color: #a5b4fc !important; }
+.leaflet-control-attribution a { color: #5eead4 !important; }
 .leaflet-bar a { background: rgba(15, 23, 42, .92) !important; color: #cbd5e1 !important; border-color: var(--border) !important; }
 .leaflet-bar a:hover { background: rgba(99, 102, 241, .25) !important; }
 
