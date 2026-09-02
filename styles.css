@@ -42,6 +42,58 @@ body {
   66% { transform: translate(-4vw, -3vh) scale(.93); }
 }
 
+/* ------------------- Fly-to-location HUD overlay --------------------
+   Shown during the "descend from orbit" search transition. Purely an
+   overlay: pointer-events none so the map stays interactive underneath. */
+.fly-hud {
+  position: absolute; inset: 0; z-index: 45;
+  pointer-events: none;
+  display: grid; place-items: center;
+  opacity: 0; transition: opacity .35s ease;
+}
+.fly-hud.fly-on { opacity: 1; }
+
+.fly-reticle { position: relative; width: 190px; height: 190px; }
+.fly-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid rgba(45, 212, 191, .55);
+  animation: fly-ping 1.9s cubic-bezier(.2, .7, .3, 1) infinite;
+}
+.fly-ring-2 { animation-delay: .65s; border-color: rgba(34, 211, 238, .4); }
+.fly-cross {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(45, 212, 191, .75), rgba(45, 212, 191, .75)) 50% 0/1px 26% no-repeat,
+    linear-gradient(rgba(45, 212, 191, .75), rgba(45, 212, 191, .75)) 50% 100%/1px 26% no-repeat,
+    linear-gradient(90deg, rgba(45, 212, 191, .75), rgba(45, 212, 191, .75)) 0 50%/26% 1px no-repeat,
+    linear-gradient(90deg, rgba(45, 212, 191, .75), rgba(45, 212, 191, .75)) 100% 50%/26% 1px no-repeat;
+}
+@keyframes fly-ping {
+  0%   { transform: scale(.45); opacity: 0; }
+  35%  { opacity: .9; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
+.fly-readout {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  top: calc(50% + 118px);
+  text-align: center; white-space: nowrap;
+}
+.fly-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .2em;
+  color: #5eead4; font-weight: 700;
+}
+.fly-coords {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 19px; font-weight: 600; color: #e0f2fe;
+  margin-top: 5px; text-shadow: 0 2px 18px rgba(0, 0, 0, .8);
+}
+.fly-sub { font-size: 11px; color: #7d9db5; margin-top: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fly-hud { display: none; }
+}
+
 /* --------------------------- Background globe -----------------------
    Fixed behind all content. Sits above the aurora blobs (z-index 0) but
    below every section (which are z-10), and never intercepts clicks.

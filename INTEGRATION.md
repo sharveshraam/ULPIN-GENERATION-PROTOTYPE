@@ -21,7 +21,8 @@ repo root
 │   ├── map.js          Leaflet map, ULPIN generation, ULPIN lookup
 │   ├── details.js      right-hand details panel (floors, units)
 │   ├── 3d-viewer.js    Three.js building viewer
-│   ├── globe.js        decorative rotating globe on the landing page
+│   ├── globe.js        decorative rotating Earth on the landing page
+│   ├── flyto.js        cinematic "descend from orbit" map transition
 │   └── ui.js           toasts, loader, modals
 ├── app/__init__.py     shim so `app.main:app` resolves from the repo root
 ├── backend/app/        the real FastAPI package
@@ -171,7 +172,13 @@ codes from a table instead.
 ```
 
 `index.html` additionally loads three.js then `js/globe.js` (which needs the
-`THREE` global) for the decorative background globe.
+`THREE` global) for the decorative background Earth.
+
+`map.html` loads `js/flyto.js` before `js/map.js`. `FlyTo.to(map, lat, lon, opts)`
+performs the orbital search transition and is called from both `searchLocation()`
+and `focusFeature()`. It falls back to an instant `setView` under
+`prefers-reduced-motion` or if a flight is already running, so the map always
+ends up at the destination.
 
 `config.js` must load before `api.js`, because `api.js` resolves the base URL at
 module-evaluation time. Each file exposes a single global (`API`, `UI`,

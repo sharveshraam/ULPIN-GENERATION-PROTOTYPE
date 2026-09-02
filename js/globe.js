@@ -1,42 +1,56 @@
 /**
- * Rotating background globe for the landing page.
+ * Rotating background Earth for the landing page.
  *
- * A "digital twin" style wireframe Earth: a Fibonacci-distributed point cloud
- * on the sphere, latitude/longitude wireframe, a soft atmosphere shell, and
- * pulsing markers at real Indian cities (this is an India-focused product, so
- * the markers are thematic rather than decorative noise).
+ * Renders a real textured globe (NASA-derived imagery via CDN) lit by a
+ * directional "sun", wrapped in an atmospheric rim shell, with pulsing
+ * markers at real Indian cities.
  *
- * Design constraints:
- *   - Purely decorative and behind all content: pointer-events none, aria-hidden.
- *   - Never breaks the page. If WebGL is missing or three.js failed to load,
- *     it silently does nothing and the CSS aurora remains as the backdrop.
- *   - Honours prefers-reduced-motion by rendering a single static frame.
- *   - Pauses when the tab is hidden or the hero is scrolled out of view, so it
- *     costs nothing while the user reads the rest of the page.
+ * Behaviours:
+ *   - Spins continuously; scrolling spins it FASTER, then it eases back to
+ *     its idle speed. Scroll direction sets the spin direction.
+ *   - Purely decorative: pointer-events none, aria-hidden, always behind
+ *     content. It can never intercept a click.
+ *   - Degrades in stages, never breaking the page:
+ *       no WebGL / no three.js -> does nothing, CSS aurora remains
+ *       texture CDN blocked    -> falls back to a wireframe + point-cloud
+ *                                 globe that still reads as Earth
+ *   - prefers-reduced-motion   -> one static frame, no animation loop
+ *   - Pauses rAF when the tab is hidden or the globe scrolls out of view.
  *
- * Uses three.js r0.128.0 UMD globals (THREE.*), matching the pin in map.html.
- * Do not "upgrade" without switching to an importmap: r148+ dropped
- * examples/js/ and r150+ dropped build/three.min.js.
+ * three.js r0.128.0 UMD globals. Do NOT upgrade without switching to an
+ * importmap: r148+ removed examples/js/, r150+ removed build/three.min.js.
  */
 const Globe = (() => {
-  let renderer, scene, camera, root, frame = null, host = null;
-  let visible = true, reduced = false;
+  let renderer, scene, camera, root, earth, frame = null, host = null;
+  let visible = true, reduced = false, started = false;
 
-  // Real coordinates, so the markers mean something.
-  const CITIES = [
-    { name: 'Delhi',        lat: 28.6139, lon: 77.2090 },
-    { name: 'Mumbai',       lat: 19.0760, lon: 72.8777 },
-    { name: 'Kolkata',      lat: 22.5726, lon: 88.3639 },
-    { name: 'Chennai',      lat: 13.0827, lon: 80.2707 },
-    { name: 'Bengaluru',    lat: 12.9716, lon: 77.5946 },
-    { name: 'Kochi',        lat:  9.9312, lon: 76.2673 },
-    { name: 'Hyderabad',    lat: 17.3850, lon: 78.4867 },
-    { name: 'Ahmedabad',    lat: 23.0225, lon: 72.5714 },
-  ];
+  // Idle spin, plus the scroll-driven boost that decays back to idle.
+  const IDLE_SPIN = 0.0016;
+  let spinBoost = 0;
+  let lastScrollY = 0;
 
   const RADIUS = 1;
 
-  /** Lat/lon (degrees) -> point on a sphere of the given radius. */
+  // Texture candidates, tried in order. All are standard three-globe assets.
+  // earth-dark suits the dark UI; blue-marble is the photographic fallback.
+  const TEXTURES = [
+    'https://cdn.jsdelivr.net/npm/three-globe@2.24.10/example/img/earth-dark.jpg',
+    'https://cdn.jsdelivr.net/npm/three-globe@2.24.10/example/img/earth-blue-marble.jpg',
+    'https://unpkg.com/three-globe@2.24.10/example/img/earth-dark.jpg',
+  ];
+
+  const CITIES = [
+    { name: 'Delhi',     lat: 28.6139, lon: 77.2090 },
+    { name: 'Mumbai',    lat: 19.0760, lon: 72.8777 },
+    { name: 'Kolkata',   lat: 22.5726, lon: 88.3639 },
+    { name: 'Chennai',   lat: 13.0827, lon: 80.2707 },
+    { name: 'Bengaluru', lat: 12.9716, lon: 77.5946 },
+    { name: 'Kochi',     lat:  9.9312, lon: 76.2673 },
+    { name: 'Hyderabad', lat: 17.3850, lon: 78.4867 },
+    { name: 'Ahmedabad', lat: 23.0225, lon: 72.5714 },
+  ];
+
+  /** Lat/lon (degrees) -> point on a sphere. Matches three.js UV orientation. */
   function toVector(lat, lon, radius = RADIUS) {
     const phi = (90 - lat) * Math.PI / 180;
     const theta = (lon + 180) * Math.PI / 180;
@@ -47,7 +61,7 @@ const Globe = (() => {
     );
   }
 
-  /** Evenly spread N points over the sphere (Fibonacci lattice). */
+  /** Evenly spread points over a sphere (Fibonacci lattice) — fallback skin. */
   function pointCloud(count) {
     const positions = new Float32Array(count * 3);
     const golden = Math.PI * (3 - Math.sqrt(5));
@@ -67,29 +81,49 @@ const Globe = (() => {
     }));
   }
 
+  /**
+   * Try each texture URL in turn; resolve with the first that loads, or null
+   * if every one fails (offline, CDN blocked, corporate proxy...).
+   */
+  function loadFirstTexture(urls) {
+    return new Promise((resolve) => {
+      const loader = new THREE.TextureLoader();
+      loader.setCrossOrigin('anonymous');
+      let i = 0;
+      const attempt = () => {
+        if (i >= urls.length) { resolve(null); return; }
+        const url = urls[i++];
+        loader.load(url, (tex) => resolve(tex), undefined, () => attempt());
+      };
+      attempt();
+    });
+  }
+
   function build() {
     root = new THREE.Group();
 
-    // Wireframe shell — the recognisable "globe" read.
+    // --- Earth sphere. Starts as a flat dark ball; the texture is swapped in
+    //     when (and if) it arrives, so the globe is visible immediately. ---
+    earth = new THREE.Mesh(
+      new THREE.SphereGeometry(RADIUS, 64, 48),
+      new THREE.MeshPhongMaterial({
+        color: 0x0d2a38, emissive: 0x04141d, specular: 0x0b3b47,
+        shininess: 12,
+      })
+    );
+    root.add(earth);
+
+    // Faint graticule, so it reads as a data globe rather than a photo.
     root.add(new THREE.LineSegments(
-      new THREE.WireframeGeometry(new THREE.SphereGeometry(RADIUS, 36, 24)),
-      new THREE.LineBasicMaterial({ color: 0x14b8a6, transparent: true, opacity: 0.13, depthWrite: false })
+      new THREE.WireframeGeometry(new THREE.SphereGeometry(RADIUS * 1.002, 36, 24)),
+      new THREE.LineBasicMaterial({ color: 0x14b8a6, transparent: true, opacity: 0.07, depthWrite: false })
     ));
-
-    // Solid core, slightly inset, so back-facing dots are occluded and the
-    // sphere reads as a volume rather than a flat scatter.
-    root.add(new THREE.Mesh(
-      new THREE.SphereGeometry(RADIUS * 0.985, 48, 32),
-      new THREE.MeshBasicMaterial({ color: 0x061620, transparent: true, opacity: 0.92 })
-    ));
-
-    root.add(pointCloud(1400));
 
     // Atmosphere: a back-side shell fakes a rim glow without post-processing.
     root.add(new THREE.Mesh(
-      new THREE.SphereGeometry(RADIUS * 1.055, 48, 32),
+      new THREE.SphereGeometry(RADIUS * 1.06, 48, 32),
       new THREE.MeshBasicMaterial({
-        color: 0x22d3ee, transparent: true, opacity: 0.055,
+        color: 0x22d3ee, transparent: true, opacity: 0.07,
         side: THREE.BackSide, depthWrite: false,
       })
     ));
@@ -97,16 +131,16 @@ const Globe = (() => {
     // City markers.
     const markers = new THREE.Group();
     CITIES.forEach(c => {
-      const p = toVector(c.lat, c.lon, RADIUS * 1.005);
+      const p = toVector(c.lat, c.lon, RADIUS * 1.008);
       const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.014, 10, 10),
+        new THREE.SphereGeometry(0.013, 10, 10),
         new THREE.MeshBasicMaterial({ color: 0x5eead4 })
       );
       dot.position.copy(p);
       markers.add(dot);
 
       const halo = new THREE.Mesh(
-        new THREE.SphereGeometry(0.03, 12, 12),
+        new THREE.SphereGeometry(0.029, 12, 12),
         new THREE.MeshBasicMaterial({ color: 0x2dd4bf, transparent: true, opacity: 0.3, depthWrite: false })
       );
       halo.position.copy(p);
@@ -116,9 +150,33 @@ const Globe = (() => {
     root.userData.markers = markers;
     root.add(markers);
 
-    // Tilt like an axial tilt; reads as a planet rather than a ball.
+    // Axial tilt, and start rotated so India faces the camera. -2.932 rad is
+    // the solved angle that maximises the +z component for ~20N 78E; every
+    // marker city sits on the visible hemisphere there.
     root.rotation.z = 0.36;
+    root.rotation.y = -2.932;
     scene.add(root);
+
+    // Lighting: a key "sun" plus enough ambient that the night side is not
+    // a black void against the dark page.
+    const sun = new THREE.DirectionalLight(0xffffff, 1.15);
+    sun.position.set(-2.2, 1.4, 2.4);
+    scene.add(sun);
+    scene.add(new THREE.AmbientLight(0x93c5fd, 0.55));
+
+    // Swap in the real Earth texture once it loads; otherwise add the
+    // point-cloud skin so the sphere still has surface detail.
+    loadFirstTexture(TEXTURES).then((tex) => {
+      if (tex) {
+        earth.material.map = tex;
+        earth.material.color = new THREE.Color(0xffffff);
+        earth.material.emissive = new THREE.Color(0x0a1a22);
+        earth.material.needsUpdate = true;
+      } else {
+        root.add(pointCloud(1400));
+      }
+      if (reduced) render(0);   // static mode: redraw the one frame
+    });
   }
 
   function resize() {
@@ -144,7 +202,9 @@ const Globe = (() => {
 
   function loop(t) {
     if (!visible) { frame = null; return; }
-    root.rotation.y += 0.0016;
+    root.rotation.y += IDLE_SPIN + spinBoost;
+    spinBoost *= 0.94;                       // ease back to the idle speed
+    if (Math.abs(spinBoost) < 1e-6) spinBoost = 0;
     render(t);
     frame = requestAnimationFrame(loop);
   }
@@ -156,17 +216,30 @@ const Globe = (() => {
     if (frame !== null) { cancelAnimationFrame(frame); frame = null; }
   }
 
+  /** Scrolling spins the globe faster; direction follows the scroll. */
+  function bindScroll() {
+    lastScrollY = window.scrollY || 0;
+    window.addEventListener('scroll', () => {
+      const y = window.scrollY || 0;
+      const dy = y - lastScrollY;
+      lastScrollY = y;
+      // Scale into a sane range and clamp, so a flung trackpad cannot make
+      // the globe strobe.
+      spinBoost += dy * 0.00022;
+      spinBoost = Math.max(-0.075, Math.min(0.075, spinBoost));
+      if (frame === null) start();          // resume if it had idled out
+    }, { passive: true });
+  }
+
   function init(hostId = 'globe') {
     host = document.getElementById(hostId);
     if (!host) return false;
-
-    // three.js absent (CDN blocked) — leave the CSS backdrop in place.
-    if (typeof THREE === 'undefined') return false;
+    if (typeof THREE === 'undefined') return false;   // CDN blocked
 
     try {
       renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     } catch (_) {
-      return false;                        // no WebGL: fail silently
+      return false;                                   // no WebGL
     }
     if (!renderer || !renderer.getContext || !renderer.getContext()) return false;
 
@@ -185,9 +258,8 @@ const Globe = (() => {
 
     reduced = window.matchMedia &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduced) { render(0); return true; }   // one static frame, no animation
+    if (reduced) { render(0); return true; }
 
-    // Don't burn cycles on a hidden tab or an off-screen hero.
     document.addEventListener('visibilitychange', () => {
       visible = !document.hidden;
       visible ? start() : stop();
@@ -199,11 +271,13 @@ const Globe = (() => {
       }, { threshold: 0 }).observe(host);
     }
 
+    bindScroll();
     start();
+    started = true;
     return true;
   }
 
-  return { init, start, stop };
+  return { init, start, stop, get isRunning() { return frame !== null; } };
 })();
 
 window.Globe = Globe;

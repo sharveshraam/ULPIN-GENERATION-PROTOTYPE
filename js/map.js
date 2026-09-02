@@ -467,7 +467,14 @@ const MapApp = (() => {
   function focusFeature(f, layer, zoom, parsed) {
     const { centroid_lat: lat, centroid_lon: lon } = f.properties;
     if (typeof lat === 'number' && typeof lon === 'number') {
-      map.flyTo([lat, lon], zoom, { duration: 1.2 });
+      // Cinematic descent, same treatment as a place search.
+      FlyTo.to(map, lat, lon, {
+        zoom,
+        label: f.properties.ulpin || 'Parcel',
+        sub: parsed && parsed.floor != null
+          ? `Descending to floor ${parsed.floor}…`
+          : 'Descending to parcel…',
+      });
     } else if (layer) {
       map.flyToBounds(layer.getBounds(), { maxZoom: zoom, duration: 1.2 });
     }
@@ -484,9 +491,10 @@ const MapApp = (() => {
       }, 260);
     }
 
-    // A 17/20-digit ULPIN names a specific floor: open it once details render.
+    // A 17/20-digit ULPIN names a specific floor: open it once the descent
+    // finishes, so the panel does not scroll while the map is still moving.
     if (parsed && parsed.floor != null && typeof Details.focusFloor === 'function') {
-      setTimeout(() => { try { Details.focusFloor(parsed.floor); } catch (_) {} }, 700);
+      setTimeout(() => { try { Details.focusFloor(parsed.floor); } catch (_) {} }, 2600);
     }
   }
 
@@ -501,8 +509,11 @@ const MapApp = (() => {
       const results = await res.json();
       UI.hideLoader();
       if (!results.length) { UI.toast(`No match for “${query}”.`, 'error'); return; }
-      map.flyTo([parseFloat(results[0].lat), parseFloat(results[0].lon)], 16, { duration: 1.3 });
-      UI.toast(`Moved to ${results[0].display_name.split(',').slice(0, 2).join(',')}. Press Generate.`, 'info', 5000);
+      const place = results[0].display_name.split(',').slice(0, 2).join(',');
+      await FlyTo.to(map, parseFloat(results[0].lat), parseFloat(results[0].lon), {
+        zoom: 16, label: place, sub: 'Entering location…',
+      });
+      UI.toast(`Moved to ${place}. Press Generate.`, 'info', 5000);
     } catch {
       UI.hideLoader();
       UI.toast('Geocoding service unreachable.', 'error');
