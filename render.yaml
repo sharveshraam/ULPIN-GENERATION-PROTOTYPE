@@ -18,8 +18,14 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
-      # Set to your deployed frontend origin(s) once known, e.g.
-      #   https://<user>.github.io
+      # Comma-separated frontend origins, or "*" for any.
+      #
+      # A browser only ever sends scheme://host[:port] as its Origin, so a
+      # GitHub Pages project URL must be given WITHOUT the repository subpath:
+      #   https://<user>.github.io          correct
+      #   https://<user>.github.io/<repo>   the app is served here, but this
+      #                                     is NOT the origin
+      # config.py normalises the value either way, so both forms now work.
       - key: ALLOWED_ORIGINS
         value: "*"
       - key: LOG_LEVEL

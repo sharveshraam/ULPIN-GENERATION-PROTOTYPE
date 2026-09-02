@@ -14,8 +14,19 @@
 const API = (() => {
 
   function resolveBase() {
-    const configured = (typeof window !== 'undefined' && window.API_BASE_URL) || '';
-    if (configured) return configured.replace(/\/$/, '');
+    let configured = (typeof window !== 'undefined' && window.API_BASE_URL) || '';
+    configured = configured.trim().replace(/\/+$/, '');
+    if (configured) {
+      // A page served over https cannot call an http API - the browser blocks
+      // it as mixed content. Upgrade rather than fail silently. localhost is
+      // exempt: browsers treat it as a secure context, and it has no https
+      // listener to upgrade to.
+      const isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/i.test(configured);
+      if (location.protocol === 'https:' && configured.startsWith('http://') && !isLoopback) {
+        configured = 'https://' + configured.slice('http://'.length);
+      }
+      return configured;
+    }
     if (['localhost', '127.0.0.1'].includes(location.hostname)) return 'http://127.0.0.1:8000';
     return '';
   }

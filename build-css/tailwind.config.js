@@ -8,7 +8,7 @@
  * Rebuild after adding new utility classes:  npm run build:css
  */
 module.exports = {
-  content: ['../index.html', '../map.html', '../diagnose.html', '../js/**/*.js'],
+  content: ['../index.html', '../map.html', '../js/**/*.js'],
   theme: { extend: {} },
   plugins: [],
 };

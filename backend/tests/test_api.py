@@ -500,3 +500,64 @@ def test_long_ulpin_persists_in_widened_column():
         db.commit()
     finally:
         db.close()
+
+
+# --------------------------------------------------------------------------- #
+# CORS origin handling
+#
+# A browser's Origin header is only ever scheme://host[:port]. Writing a
+# GitHub Pages URL with its repository subpath into ALLOWED_ORIGINS used to be
+# accepted verbatim and then never match, so responses came back 200 with no
+# Access-Control-Allow-Origin header and the browser silently blocked them.
+# --------------------------------------------------------------------------- #
+from app.config import _normalise_origins  # noqa: E402
+
+
+def test_origin_subpath_is_reduced_to_origin():
+    assert _normalise_origins(
+        "https://sharveshraam.github.io/ULPIN-GENERATION-PROTOTYPE"
+    ) == ["https://sharveshraam.github.io"]
+
+
+def test_origin_trailing_slash_is_stripped():
+    assert _normalise_origins("https://sharveshraam.github.io/") == [
+        "https://sharveshraam.github.io"
+    ]
+
+
+def test_wildcard_is_preserved():
+    assert _normalise_origins("*") == ["*"]
+
+
+def test_port_is_kept_and_duplicates_collapse():
+    assert _normalise_origins("http://localhost:3000/app, http://localhost:3000") == [
+        "http://localhost:3000"
+    ]
+
+
+def test_multiple_origins_are_each_normalised():
+    assert _normalise_origins("https://a.github.io/repo , https://b.com/x/y") == [
+        "https://a.github.io",
+        "https://b.com",
+    ]
+
+
+def test_health_sends_cors_header_for_pages_origin():
+    """End-to-end: the deployed frontend origin must be allowed."""
+    origin = "https://sharveshraam.github.io"
+    res = client.get("/health", headers={"Origin": origin})
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") in (origin, "*")
+
+
+def test_preflight_allows_json_post_from_pages_origin():
+    res = client.options(
+        "/api/v1/generate-3d-model",
+        headers={
+            "Origin": "https://sharveshraam.github.io",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert res.status_code == 200
+    assert "access-control-allow-origin" in res.headers

@@ -16,7 +16,7 @@ npm install
 npm run build:css
 ```
 
-`tailwind.config.js` scans `index.html`, `map.html`, `diagnose.html` and
+`tailwind.config.js` scans `index.html`, `map.html` and
 `js/**/*.js`. Classes assembled from string fragments at runtime cannot be
 detected by that scan — write them out in full, or add them to a `safelist`
 in the config.
