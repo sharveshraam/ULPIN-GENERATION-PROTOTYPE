@@ -65,7 +65,7 @@ class Settings:
 
     def __init__(self) -> None:
         self.app_name: str = _env("APP_NAME", "ULPIN Generation API")
-        self.version: str = "1.0.0"
+        self.version: str = "1.1.0"
         self.database_url: str = _env("DATABASE_URL", "sqlite:///./ulpin_database.db")
 
         # Allowed browser origins. ALLOWED_ORIGINS is the canonical name;

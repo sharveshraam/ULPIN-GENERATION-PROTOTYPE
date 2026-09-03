@@ -74,11 +74,18 @@ python3 -m http.server 3000      # then open http://127.0.0.1:3000
 ```
 
 The frontend auto-detects the backend at `http://127.0.0.1:8000` when you are on
-localhost. To point it elsewhere (e.g. a Cloud Run URL) append `?api=`:
+localhost. Anywhere else it uses the URL fixed in `js/config.js` (there is no
+`?api=` query override — the endpoint is committed in code).
+
+The backend also serves this same frontend at `/app/`:
 
 ```
-http://127.0.0.1:3000/map.html?api=https://your-service.run.app
+https://<your-service>.onrender.com/app/
 ```
+
+This is the recommended way to run the deployed app: every API call is
+same-origin (no CORS, no third-party blocking by tracking prevention), and it
+works even when `ALLOWED_ORIGINS` on the service is wrong.
 
 > **Browser mode.** If the backend is unreachable the app still works — it queries
 > Overpass directly and computes floors/units client-side using identical rules.
@@ -253,9 +260,12 @@ The backend must allow the Pages origin. On Render set:
 ALLOWED_ORIGINS = https://<user>.github.io
 ```
 
-(no path, no trailing slash), or `*` for an open demo. If it is left unset while
-the frontend is on a different domain, every request fails CORS and the app
-silently drops into browser mode.
+(no path, no trailing slash), or `*` for an open demo. Even if that variable is
+missing, stale or malformed, the backend now ships a **permissive CORS
+fallback** that answers any origin, so a Pages → API call can no longer be
+silently CORS-blocked. If you do see "API CORS blocked" in the pill, the
+service is running a build older than v1.1.0 — redeploy it (or just use
+`/app/`, which avoids CORS entirely).
 
 Two gotchas worth knowing:
 
@@ -273,7 +283,7 @@ client-side and shows "Browser mode" in the header.
 
 ## Testing checklist
 
-- [ ] `pytest` — 61 tests pass
+- [ ] `pytest` — 89 tests pass
 - [ ] `/health` returns `{"status":"ok","database":"connected"}`
 - [ ] `/docs` renders the full endpoint list
 - [ ] Landing page: nav, scroll-reveal, API status pill
