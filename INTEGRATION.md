@@ -229,6 +229,17 @@ path, no trailing slash).
 The origins in effect are logged at startup:
 `CORS origins=[...] credentials=False`.
 
+**Hardening: `cors_fallback` middleware in `backend/app/main.py`.** Even with a
+missing/malformed/stale `ALLOWED_ORIGINS`, the backend answers every origin:
+unmatched GETs get the request origin echoed back, rejected preflights are
+converted to `200` with `Access-Control-Allow-*: *`, and the `null` origin gets
+`*` with `Access-Control-Allow-Credentials` removed (the `*`+credentials pair is
+rejected by browsers). This is why "API blocked" can no longer be a CORS
+misconfiguration — it was the real cause all along: a CORS failure looks
+identical to an ad-block cancel (`TypeError: Failed to fetch`, no status), so
+incognito/private-window tests cannot tell them apart, and the frontend used
+to blame extensions.
+
 ---
 
 ## 8. Running it locally
@@ -245,7 +256,14 @@ python3 -m http.server 3000
 Open `http://localhost:3000/map.html`. With `API_BASE_URL` empty, localhost is
 auto-detected and the frontend talks to `http://127.0.0.1:8000`.
 
-Tests: `cd backend && .venv/bin/python -m pytest tests/ -q` → **61 passed**.
+Tests: `cd backend && .venv/bin/python -m pytest tests/ -q` → **89 passed**.
+
+The backend can also serve the frontend: `uvicorn` mounts
+`backend/app/static` (vendored mirror of the repo root, kept in sync by
+`scripts/sync_frontend.sh` — a test fails if they drift) at `/app/`, so
+`https://<service>.onrender.com/app/` is the same-origin UI. `js/api.js`
+ignores `API_BASE_URL` when the page origin matches it, so no rebuild is
+needed when swapping between GitHub Pages and `/app/`.
 
 ---
 
@@ -281,9 +299,15 @@ Gotchas that have already bitten this project:
 
 ## 10. Current state
 
-- Branches `prototype` and `arena/01a05c3c-ulpin-generation-prototype` are in
-  sync. `main` is stale (still the original upload) and is **not** what Pages
-  serves.
-- `js/config.js` currently has `API_BASE_URL = ''` — **this is why a deployed
-  frontend reports "Browser mode"**. Setting it to the Render URL is the one
-  remaining step to link the two halves.
+- `js/config.js` points at `https://ulpin-generation-prototype.onrender.com`
+  and that service answers `/health`, `/status`, `/ulpin-status` as `ok`.
+- The LIVE backend is an older build: it does **not** serve `/app/` and its
+  CORS response has no `Access-Control-Allow-Origin` for the Pages origin
+  (verified via an external CORS probe). That is what produced the
+  "API blocked" pill even in a private window — a CORS rejection, not an ad
+  blocker. **Redeploy the service from `main`/`prototype` after merging the
+  latest fix**; v1.1.0 adds the CORS fallback, the `/app/` frontend served
+  from inside the Python package, and a frontend that reports
+  "API CORS blocked" (with the `/app/` link) instead of blaming extensions.
+- GitHub Pages serves from the `prototype` branch, repo root.
+- Frontend edits must be mirrored: `bash scripts/sync_frontend.sh`.

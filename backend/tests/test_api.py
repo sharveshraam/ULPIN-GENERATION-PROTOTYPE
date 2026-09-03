@@ -1,6 +1,7 @@
 """Backend test suite. Network-dependent endpoints are exercised with stubs."""
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -564,6 +565,92 @@ def test_preflight_allows_json_post_from_pages_origin():
 
 
 # --------------------------------------------------------------------------- #
+# CORS fallback middleware
+#
+# The deployed Render service can carry an explicit (possibly malformed)
+# ALLOWED_ORIGINS that does not include the actual frontend origin. The
+# browser then throws "Failed to fetch" with no status, and the frontend
+# mislabels it "API blocked" - even in a private window, because it is not an
+# extension problem. The fallback guarantees CORS headers for any origin.
+# --------------------------------------------------------------------------- #
+def asyncio_run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+async def _cors_fallback_case(origin_header: bytes | None, pre_set: str | None = None,
+                              with_credentials: bool = True, preflight: bool = False):
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+
+    from app.main import cors_fallback
+
+    headers = [(b"host", b"api.test")]
+    if origin_header is not None:
+        headers.append((b"origin", origin_header))
+    if preflight:
+        headers += [(b"access-control-request-method", b"POST"),
+                    (b"access-control-request-headers", b"content-type")]
+
+    async def call_next(_request):
+        # Mimic Starlette's CORSMiddleware on a rejected request: 400 without
+        # ACAO but with the credentials header it sets globally.
+        resp = JSONResponse({"detail": "Disallowed CORS origin"}, status_code=400) if preflight \
+            else JSONResponse({"ok": True})
+        if with_credentials:
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+        if pre_set:
+            resp.headers["Access-Control-Allow-Origin"] = pre_set
+        return resp
+
+    return await cors_fallback(Request({"type": "http", "method": "OPTIONS" if preflight else "GET",
+                                        "path": "/health", "headers": headers}), call_next)
+
+
+def test_cors_fallback_echoes_unlisted_origin():
+    """Even a totally unknown origin must get CORS headers (public API)."""
+    res = asyncio_run(_cors_fallback_case(b"https://some-unknown-site.example"))
+    assert res.headers["access-control-allow-origin"] == "https://some-unknown-site.example"
+    assert res.headers["access-control-allow-methods"] == "*"
+    assert res.headers["access-control-allow-headers"] == "*"
+    assert res.headers["vary"] == "Origin"
+
+
+def test_cors_fallback_never_pairs_wildcard_with_credentials():
+    """'*' + credentials is rejected by browsers; never emit the pair."""
+    res = asyncio_run(_cors_fallback_case(b"null", with_credentials=True))
+    assert res.headers["access-control-allow-origin"] == "*"
+    assert res.headers.get("access-control-allow-credentials") is None
+
+
+def test_cors_fallback_converts_rejected_preflight_to_200():
+    """A disallowed OPTIONS must answer 200 so the browser proceeds."""
+    res = asyncio_run(_cors_fallback_case(b"https://some-unknown-site.example",
+                                          preflight=True, with_credentials=True))
+    assert res.status_code == 200
+    assert res.headers["access-control-allow-origin"] == "https://some-unknown-site.example"
+
+
+def test_cors_fallback_keeps_credentials_on_echoed_origin():
+    """Echoing the origin + credentials is valid, unlike '*' + credentials."""
+    res = asyncio_run(_cors_fallback_case(b"https://sharveshraam.github.io",
+                                          with_credentials=True))
+    assert res.headers["access-control-allow-origin"] == "https://sharveshraam.github.io"
+    assert res.headers["access-control-allow-credentials"] == "true"
+
+
+def test_cors_fallback_leaves_existing_header_alone():
+    res = asyncio_run(_cors_fallback_case(b"https://sharveshraam.github.io",
+                                          pre_set="https://sharveshraam.github.io"))
+    assert res.headers["access-control-allow-origin"] == "https://sharveshraam.github.io"
+
+
+def test_cors_fallback_ignores_requests_without_origin():
+    """Server-side probes (curl, uptime checks) need no CORS header."""
+    res = asyncio_run(_cors_fallback_case(None))
+    assert "access-control-allow-origin" not in res.headers
+
+
+# --------------------------------------------------------------------------- #
 # Health-probe aliases
 #
 # "/health" is a path token that ad-block and tracking-prevention filter lists
@@ -631,3 +718,26 @@ def test_root_still_returns_json_banner_not_html():
     res = client.get("/")
     assert res.headers["content-type"].startswith("application/json")
     assert res.json()["data"]["name"]
+    assert res.json()["data"]["frontend"] == "/app/"
+
+
+def test_vendored_frontend_matches_repo_root():
+    """The static copy served at /app must never drift from repo-root files.
+
+    GitHub Pages serves the repo root; FastAPI serves backend/app/static.
+    Both must stay identical - run scripts/sync_frontend.sh after frontend
+    edits (or just change both). This test fails CI if they diverge.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    static = root / "backend" / "app" / "static"
+    rels = ["index.html", "map.html", "styles.css", "tailwind.css"] + [
+        f"js/{name}" for name in
+        ("api.js", "config.js", "details.js", "flyto.js", "globe.js",
+         "map.js", "ui.js", "3d-viewer.js")
+    ]
+    for rel in rels:
+        assert (static / rel).read_bytes() == (root / rel).read_bytes(), (
+            f"{rel} drifted; run scripts/sync_frontend.sh"
+        )

@@ -15,7 +15,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -80,6 +80,59 @@ logger.info(
     "CORS origins=%s credentials=%s", settings.cors_origins, settings.allow_credentials
 )
 
+
+@app.middleware("http")
+async def cors_fallback(request: Request, call_next):
+    """Guarantee CORS even if the configured allowlist rejects the origin.
+
+    The frontend and API are deployed on different hosts (GitHub Pages ->
+    Render). If ``ALLOWED_ORIGINS`` on the deployed service is missing,
+    malformed (e.g. with a repository subpath or trailing slash) or otherwise
+    does not match the browser's Origin, FastAPI still returns the payload but
+    WITHOUT ``Access-Control-Allow-Origin``. The browser then raises a
+    TypeError and the frontend reports "API blocked" — and no amount of
+    incognito/private-window testing helps, because the extension/cookie
+    theory is wrong; it is simply CORS.
+
+    This is a public, credential-free demo API, so the permissive answer is
+    safe: any origin may call it. Registered AFTER ``CORSMiddleware`` so it
+    runs outermost - when the configured middleware already allowed the
+    origin we leave its headers alone; only CORS-less responses get patched.
+
+    Two details matter:
+
+    * ``CORSMiddleware`` rejects a disallowed PREFLIGHT with HTTP 400, and a
+      browser aborts before reading the body, so we convert that to 200.
+    * ``CORSMiddleware`` sets ``Access-Control-Allow-Credentials: true``
+      whenever an explicit (non-wildcard) allowlist is configured, even on a
+      rejected request. ``Access-Control-Allow-Origin: *`` alongside
+      credentials is invalid, so we echo the request origin instead and mark
+      ``Vary: Origin``. The ``null`` origin (file://, sandboxed iframes) gets
+      ``*`` with the credentials header removed.
+    """
+    response = await call_next(request)
+    origin = request.headers.get("origin")
+    if not origin or response.headers.get("access-control-allow-origin"):
+        return response
+
+    is_preflight = (
+        request.method == "OPTIONS"
+        and request.headers.get("access-control-request-method") is not None
+    )
+    if is_preflight and response.status_code in (400, 403):
+        response = Response(status_code=200)
+
+    if origin == "null":
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        if "access-control-allow-credentials" in response.headers:
+            del response.headers["access-control-allow-credentials"]
+    else:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
 # --------------------------------------------------------------------------- #
 # Rate limiting (in-process; sufficient for a single Cloud Run instance)
 # --------------------------------------------------------------------------- #
@@ -132,6 +185,9 @@ async def root():
             "name": settings.app_name,
             "version": settings.version,
             "docs": "/docs",
+            # Same-origin frontend. Open this URL in a browser to use the app
+            # with zero cross-origin requests (no CORS, no third-party block).
+            "frontend": "/app/",
             "ulpin_format": {
                 "parcel": "14 digits [state2][district2][subdistrict3][village3][plot4]",
                 "floor": "17 digits (parcel + floor3)",
@@ -564,14 +620,30 @@ async def search(
 #
 # GitHub Pages keeps working exactly as before - this is an addition, not a
 # replacement. js/config.js resolves to same-origin automatically when the
-# page is not on a known static host, so no build-time switch is needed.
+# page is served from here.
+#
+# The frontend is looked up in order of preference, so the mount works no
+# matter how the service is packaged:
+#   1. backend/app/static   vendored copy shipped inside the Python package
+#                           (works for Docker builds, root directory =
+#                           backend, and every other packaging variant)
+#   2. repository root       plain git checkout on native Python (Render)
+#   3. current working dir   last resort for exotic layouts
 # --------------------------------------------------------------------------- #
-# Repository root, which holds index.html, map.html, js/ and the stylesheets.
-_FRONTEND_DIR = _os.path.dirname(
-    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+_PKG_DIR = _os.path.dirname(_os.path.abspath(__file__))  # .../backend/app
+_FRONTEND_CANDIDATES = [
+    _os.path.join(_PKG_DIR, "static"),
+    _os.path.dirname(_PKG_DIR),          # backend/
+    _os.path.dirname(_os.path.dirname(_PKG_DIR)),  # repo root
+    _os.getcwd(),
+]
+_FRONTEND_DIR = next(
+    (d for d in _FRONTEND_CANDIDATES
+     if _os.path.isfile(_os.path.join(d, "index.html"))),
+    None,
 )
 
-if _os.path.isfile(_os.path.join(_FRONTEND_DIR, "index.html")):
+if _FRONTEND_DIR:
     from fastapi.staticfiles import StaticFiles
 
     # Mounted at /app rather than / so the JSON banner at "/" stays put: it is
@@ -581,7 +653,7 @@ if _os.path.isfile(_os.path.join(_FRONTEND_DIR, "index.html")):
     app.mount("/app", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")
     logger.info("Serving frontend at /app from %s", _FRONTEND_DIR)
 else:  # pragma: no cover - only when deployed without the static files
-    logger.info("No frontend found at %s; running API-only", _FRONTEND_DIR)
+    logger.warning("No frontend found in %s; running API-only", _FRONTEND_CANDIDATES)
 
 
 # --------------------------------------------------------------------------- #

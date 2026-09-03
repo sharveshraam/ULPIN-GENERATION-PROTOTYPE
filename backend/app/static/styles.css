@@ -1,0 +1,284 @@
+/* ============================================================
+   ULPIN Atlas — shared styles
+   Palette: teal #14b8a6 / cyan #06b6d4 / sky #0ea5e9
+            on deep ocean-slate #060f18
+   A cartographic palette: cool, map-like, and distinct from the
+   generic indigo/violet SaaS look.
+   ============================================================ */
+
+:root {
+  --primary: #14b8a6;
+  --secondary: #06b6d4;
+  --accent: #22d3ee;
+  --highlight: #2dd4bf;
+  --bg: #060f18;
+  --bg-soft: #0b1a26;
+  --border: rgba(125, 211, 218, 0.15);
+  --text: #dbeafe;
+  --muted: #64809b;
+  --glow: rgba(20, 184, 166, .8);
+}
+
+* { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---------------------------- Ambient bg ---------------------------- */
+.aurora { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
+.blob { position: absolute; border-radius: 50%; filter: blur(100px); opacity: .4; animation: drift 24s ease-in-out infinite; }
+.blob.b1 { width: 44vw; height: 44vw; background: #14b8a6; top: -12vw; left: -8vw; }
+.blob.b2 { width: 38vw; height: 38vw; background: #0891b2; bottom: -14vw; right: -6vw; animation-delay: -8s; }
+.blob.b3 { width: 30vw; height: 30vw; background: #0ea5e9; top: 40%; left: 50%; animation-delay: -15s; opacity: .3; }
+
+@keyframes drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(5vw, 4vh) scale(1.1); }
+  66% { transform: translate(-4vw, -3vh) scale(.93); }
+}
+
+/* ------------------- Fly-to-location HUD overlay --------------------
+   Shown during the "descend from orbit" search transition. Purely an
+   overlay: pointer-events none so the map stays interactive underneath. */
+.fly-hud {
+  position: absolute; inset: 0; z-index: 45;
+  pointer-events: none;
+  display: grid; place-items: center;
+  opacity: 0; transition: opacity .35s ease;
+}
+.fly-hud.fly-on { opacity: 1; }
+
+.fly-reticle { position: relative; width: 190px; height: 190px; }
+.fly-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid rgba(45, 212, 191, .55);
+  animation: fly-ping 1.9s cubic-bezier(.2, .7, .3, 1) infinite;
+}
+.fly-ring-2 { animation-delay: .65s; border-color: rgba(34, 211, 238, .4); }
+.fly-cross {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(45, 212, 191, .75), rgba(45, 212, 191, .75)) 50% 0/1px 26% no-repeat,
+    linear-gradient(rgba(45, 212, 191, .75), rgba(45, 212, 191, .75)) 50% 100%/1px 26% no-repeat,
+    linear-gradient(90deg, rgba(45, 212, 191, .75), rgba(45, 212, 191, .75)) 0 50%/26% 1px no-repeat,
+    linear-gradient(90deg, rgba(45, 212, 191, .75), rgba(45, 212, 191, .75)) 100% 50%/26% 1px no-repeat;
+}
+@keyframes fly-ping {
+  0%   { transform: scale(.45); opacity: 0; }
+  35%  { opacity: .9; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
+.fly-readout {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  top: calc(50% + 118px);
+  text-align: center; white-space: nowrap;
+}
+.fly-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .2em;
+  color: #5eead4; font-weight: 700;
+}
+.fly-coords {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 19px; font-weight: 600; color: #e0f2fe;
+  margin-top: 5px; text-shadow: 0 2px 18px rgba(0, 0, 0, .8);
+}
+.fly-sub { font-size: 11px; color: #7d9db5; margin-top: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fly-hud { display: none; }
+}
+
+/* --------------------------- Background globe -----------------------
+   Fixed behind all content. Sits above the aurora blobs (z-index 0) but
+   below every section (which are z-10), and never intercepts clicks.
+   Masked at the edges so it dissolves into the page instead of ending
+   on a hard rectangle.                                                 */
+.globe-bg {
+  position: fixed;
+  top: 50%; left: 62%;
+  width: min(96vh, 900px); height: min(96vh, 900px);
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  pointer-events: none;
+  opacity: .78;
+  mask-image: radial-gradient(circle at 50% 50%, #000 55%, transparent 78%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 55%, transparent 78%);
+  animation: globe-in 1.6s cubic-bezier(.2, .8, .3, 1) both;
+}
+.globe-bg canvas { display: block; width: 100% !important; height: 100% !important; }
+
+@keyframes globe-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.9); }
+  to   { opacity: .78; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* On narrow screens the globe competes with the text: shrink, recentre
+   and fade it well back so copy stays readable. */
+@media (max-width: 900px) {
+  .globe-bg {
+    left: 50%; top: 42%;
+    width: min(115vw, 620px); height: min(115vw, 620px);
+    opacity: .34;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .globe-bg { animation: none; }
+}
+
+.grid-veil {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(20, 184, 166, .075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 184, 166, .075) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 55% at 50% 35%, #000 25%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 55% at 50% 35%, #000 25%, transparent 100%);
+}
+
+/* ------------------------------ Glass ------------------------------- */
+.glass {
+  background: rgba(9, 24, 35, .74);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid var(--border);
+}
+.glass-soft { background: rgba(255, 255, 255, .04); border: 1px solid rgba(125, 211, 218, .13); }
+
+/* ----------------------------- Buttons ------------------------------ */
+.btn-primary {
+  position: relative; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  color: #fff; font-weight: 600;
+  box-shadow: 0 10px 30px -10px var(--glow);
+  transition: transform .18s cubic-bezier(.2, .9, .3, 1.2), box-shadow .2s, filter .2s;
+}
+.btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 16px 38px -10px rgba(20, 184, 166, .95); filter: brightness(1.08); }
+.btn-primary:active:not(:disabled) { transform: translateY(0) scale(.98); }
+.btn-primary::after {
+  content: ''; position: absolute; top: 0; left: -120%; width: 60%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .3), transparent);
+  transform: skewX(-20deg);
+}
+.btn-primary:hover:not(:disabled)::after { animation: sheen .9s ease; }
+@keyframes sheen { to { left: 145%; } }
+
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: .45rem;
+  border: 1px solid var(--border); color: #cbd5e1;
+  transition: all .18s ease;
+}
+.btn-ghost:hover { background: rgba(99, 102, 241, .14); border-color: rgba(99, 102, 241, .5); transform: translateY(-1px); color: #fff; }
+
+/* ---------------------------- Animations ---------------------------- */
+[data-reveal] { opacity: 0; transform: translateY(26px); transition: opacity .75s cubic-bezier(.22, 1, .36, 1), transform .75s cubic-bezier(.22, 1, .36, 1); }
+[data-reveal].revealed { opacity: 1; transform: none; }
+
+.rise { opacity: 0; transform: translateY(20px); animation: rise .85s cubic-bezier(.22, 1, .36, 1) forwards; }
+@keyframes rise { to { opacity: 1; transform: none; } }
+
+.gradient-text {
+  background: linear-gradient(100deg, #5eead4 0%, #67e8f9 45%, #7dd3fc 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+.float-slow { animation: floaty 7s ease-in-out infinite; }
+@keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+
+.shimmer {
+  background: linear-gradient(90deg, rgba(255, 255, 255, .04) 25%, rgba(255, 255, 255, .12) 37%, rgba(255, 255, 255, .04) 63%);
+  background-size: 400% 100%; animation: shimmer 1.4s ease infinite;
+}
+@keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+.spinner {
+  display: inline-block; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .3); border-top-color: #fff;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.radar { width: 66px; height: 66px; border-radius: 50%; border: 2px solid rgba(99, 102, 241, .2); position: relative; margin: 0 auto; }
+.radar::after {
+  content: ''; position: absolute; inset: -2px; border-radius: 50%;
+  border: 2px solid transparent; border-top-color: var(--primary); border-right-color: var(--secondary);
+  animation: spin 1s linear infinite;
+}
+
+.toast { animation: toastIn .4s cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-16px) scale(.96); } to { opacity: 1; transform: none; } }
+
+/* ------------------------------ Cards ------------------------------- */
+.feature-card { transition: transform .25s cubic-bezier(.22, 1, .36, 1), border-color .25s, background .25s; }
+.feature-card:hover { transform: translateY(-6px); border-color: rgba(99, 102, 241, .45); background: rgba(99, 102, 241, .07); }
+
+.stat-card { transition: transform .2s, border-color .2s, background .2s; }
+.stat-card:hover { transform: translateY(-3px); border-color: rgba(99, 102, 241, .45); background: rgba(99, 102, 241, .07); }
+
+/* ------------------------------ Modal ------------------------------- */
+.modal { opacity: 0; transition: opacity .22s ease; }
+.modal.modal-open { opacity: 1; }
+.modal .modal-card { transform: translateY(18px) scale(.985); transition: transform .28s cubic-bezier(.22, 1, .36, 1); }
+.modal.modal-open .modal-card { transform: none; }
+
+/* ------------------------------- Map -------------------------------- */
+.leaflet-container { background: #05070f; font-family: 'Inter', sans-serif; }
+.leaflet-control-attribution { background: rgba(5, 7, 15, .75) !important; color: #64748b !important; font-size: 9px !important; }
+.leaflet-control-attribution a { color: #5eead4 !important; }
+.leaflet-bar a { background: rgba(15, 23, 42, .92) !important; color: #cbd5e1 !important; border-color: var(--border) !important; }
+.leaflet-bar a:hover { background: rgba(99, 102, 241, .25) !important; }
+
+.parcel-tip {
+  background: rgba(11, 16, 32, .95); border: 1px solid rgba(99, 102, 241, .45); color: #e2e8f0;
+  border-radius: 8px; font-size: 11px; font-weight: 600; padding: 4px 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .55);
+}
+.parcel-tip::before { display: none; }
+
+/* --------------------------- Floor / units --------------------------- */
+.floor-row { border: 1px solid transparent; transition: background .15s, border-color .15s, transform .15s; }
+.floor-row:hover { background: rgba(99, 102, 241, .12); border-color: rgba(99, 102, 241, .3); transform: translateX(2px); }
+.floor-row.floor-active { background: rgba(16, 185, 129, .16); border-color: rgba(16, 185, 129, .45); }
+
+.unit-chip {
+  display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+  padding: .3rem .55rem; border-radius: .45rem;
+  background: rgba(255, 255, 255, .04); border: 1px solid rgba(148, 179, 226, .1);
+  transition: background .15s, border-color .15s;
+}
+.unit-chip:hover { background: rgba(99, 102, 241, .14); border-color: rgba(99, 102, 241, .35); }
+
+.dot { display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: #475569; margin: 0 .6rem; vertical-align: middle; }
+
+/* ---------------------------- Scrollbars ---------------------------- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(120, 150, 200, .3); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(120, 150, 200, .52); }
+
+/* ------------------------------ Inputs ------------------------------ */
+input, select { color-scheme: dark; }
+select option { background: #0f172a; color: #e2e8f0; }
+input:focus, select:focus { outline: none; }
+
+/* --------------------------- Status pill ---------------------------- */
+.pill-live { background: rgba(16, 185, 129, .15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, .35); }
+.pill-off { background: rgba(245, 158, 11, .13); color: #fcd34d; border: 1px solid rgba(245, 158, 11, .32); }
+
+/* ---------------------------- Responsive ---------------------------- */
+@media (max-width: 900px) {
+  .side-panel { position: absolute; inset: auto 0 0 0; width: 100% !important; max-height: 52vh; border-radius: 1rem 1rem 0 0; }
+  .hide-sm { display: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  [data-reveal] { opacity: 1; transform: none; }
+}
