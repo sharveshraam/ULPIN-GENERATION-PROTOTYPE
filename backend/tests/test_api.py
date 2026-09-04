@@ -774,6 +774,45 @@ def test_root_still_returns_json_banner_not_html():
     assert res.json()["data"]["frontend"] == "/app/"
 
 
+# What a real browser sends when a person types the URL or a preview iframe
+# loads it. Note the trailing */*;q=0.8 - the negotiation must not be fooled
+# into thinking a browser wants JSON just because it accepts anything.
+BROWSER_ACCEPT = (
+    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+    "image/avif,image/webp,*/*;q=0.8"
+)
+
+
+def test_root_sends_a_browser_to_the_frontend():
+    """A human landing on the bare host wants the app, not a JSON blob."""
+    res = client.get("/", headers={"Accept": BROWSER_ACCEPT}, follow_redirects=False)
+    assert res.status_code == 302
+    assert res.headers["location"] == "/app/"
+
+
+def test_root_browser_redirect_actually_reaches_the_ui():
+    res = client.get("/", headers={"Accept": BROWSER_ACCEPT})   # follows
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/html")
+
+
+def test_root_keeps_json_for_api_clients():
+    """fetch() sends Accept: */*, and js/api.js probes "/" as a health path."""
+    for accept in ("*/*", "application/json", "", "application/json, */*;q=0.8"):
+        res = client.get("/", headers={"Accept": accept}, follow_redirects=False)
+        assert res.status_code == 200, accept
+        assert res.headers["content-type"].startswith("application/json"), accept
+        assert res.json()["success"] is True, accept
+
+
+def test_root_prefers_json_when_both_are_equally_accepted():
+    """A tie must not redirect: the machine-readable banner is the contract."""
+    res = client.get("/", headers={"Accept": "text/html;q=0.5, application/json;q=0.5"},
+                     follow_redirects=False)
+    assert res.status_code == 200
+    assert res.json()["data"]["frontend"] == "/app/"
+
+
 def test_vendored_frontend_matches_repo_root():
     """The static copy served at /app must never drift from repo-root files.
 

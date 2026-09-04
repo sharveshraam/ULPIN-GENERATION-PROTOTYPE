@@ -48,7 +48,7 @@ import orjson
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -272,8 +272,44 @@ async def _read_health() -> tuple[str, int]:
 # --------------------------------------------------------------------------- #
 # Meta
 # --------------------------------------------------------------------------- #
+def _prefers_html(accept: str) -> bool:
+    """
+    True when a *person* navigated here in a browser, rather than code calling.
+
+    Browsers send ``text/html,...,*/*;q=0.8``; ``fetch()`` with no Accept header
+    sends ``*/*``. Comparing the q-values of text/html against application/json
+    (and application/*) separates the two without guessing from User-Agent.
+    """
+    if not accept:
+        return False
+    best_html = best_json = 0.0
+    for part in accept.split(","):
+        media, _, rest = part.partition(";")
+        media = media.strip().lower()
+        q = 1.0
+        for param in rest.split(";"):
+            param = param.strip()
+            if param.startswith("q="):
+                try:
+                    q = float(param[2:])
+                except ValueError:
+                    q = 0.0
+        if media in ("text/html", "application/xhtml+xml"):
+            best_html = max(best_html, q)
+        elif media in ("application/json", "application/*"):
+            best_json = max(best_json, q)
+    return best_html > best_json
+
+
 @app.get("/", tags=["meta"])
-async def root():
+async def root(request: Request):
+    # A human who lands on the bare host - a Render URL, or a preview of one -
+    # wants the app, not a JSON blob. Content-negotiate: browsers are sent to
+    # the frontend, and anything that asks for JSON (fetch, curl, the frontend's
+    # own last-resort "/" health probe, which sends Accept: */*) still gets the
+    # banner below. The banner must stay machine-readable at this exact path.
+    if _FRONTEND_DIR and _prefers_html(request.headers.get("accept", "")):
+        return RedirectResponse(url="/app/", status_code=302)
     return {
         "success": True,
         "data": {
