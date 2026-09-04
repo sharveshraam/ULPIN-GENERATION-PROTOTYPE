@@ -150,15 +150,31 @@ const MapApp = (() => {
     return map;
   }
 
+  // The radius outline sits on Esri satellite imagery: sand, water, cloud,
+  // white roofs. A lone 1.5 px pale-indigo dash vanishes against all of them,
+  // which is why it read as missing. The cartographic fix is a CASED stroke:
+  // a near-black halo under a bright line, sharing one dash pattern so every
+  // dash carries its own outline, plus the faintest fill so the covered area
+  // reads as an area and not just a thread.
+  const RADIUS_HALO = {
+    color: '#000000', weight: 7, opacity: 0.6,
+    dashArray: '9 6', fill: false, interactive: false,
+  };
+  const RADIUS_LINE = {
+    color: '#e879f9', weight: 2.75, opacity: 1,
+    dashArray: '9 6', fill: true, fillColor: '#e879f9', fillOpacity: 0.06,
+    interactive: false,
+  };
+
   /** Dashed circle showing the selected generation radius. */
   function updateRadiusPreview() {
     const km = parseFloat(document.getElementById('radiusSelect')?.value || '1');
     const c = map.getCenter();
     if (radiusCircle) map.removeLayer(radiusCircle);
-    radiusCircle = L.circle(c, {
-      radius: km * 1000, color: '#818cf8', weight: 1.5,
-      dashArray: '7 6', fill: false, interactive: false,
-    }).addTo(map);
+    radiusCircle = L.layerGroup([
+      L.circle(c, { radius: km * 1000, ...RADIUS_HALO }),
+      L.circle(c, { radius: km * 1000, ...RADIUS_LINE }),
+    ]).addTo(map);
   }
 
   /* --------------------------- Overpass (fallback) --------------------- */
