@@ -606,9 +606,161 @@ const MapApp = (() => {
     UI.download('ulpin-parcels.csv', UI.toCSV(rows), 'text/csv');
   }
 
+  /* --------------------------- Draw a footprint --------------------------
+     OpenStreetMap has coverage holes: roofs plainly visible in the imagery
+     but mapped nowhere, which is common in rural India. Tracing one by hand
+     and registering it through POST /api/v1/parcels gives it a real ULPIN, so
+     an unmapped village is not a dead end. Plain Leaflet clicks - no plugin,
+     no extra dependency, nothing new to download on a 0.1 CPU host.        */
+  let draw = null;               // { pts, markers, preview } while active
+
+  function drawActive() { return draw !== null; }
+
+  function toggleDraw() { draw ? cancelDraw(true) : startDraw(); }
+
+  function setDrawButton(on) {
+    const btn = document.getElementById('drawBtn');
+    if (!btn) return;
+    btn.classList.toggle('btn-primary', on);
+    btn.classList.toggle('btn-ghost', !on);
+    btn.textContent = on ? 'Cancel drawing' : 'Draw a footprint';
+  }
+
+  function startDraw() {
+    if (draw || busy) return;
+    draw = { pts: [], markers: [], preview: null };
+    map.getContainer().classList.add('drawing');
+    map.doubleClickZoom.disable();      // dblclick means "finish", not "zoom"
+    map.on('click', onDrawClick);
+    map.on('dblclick', onDrawFinish);
+    document.addEventListener('keydown', onDrawKey);
+    setDrawButton(true);
+    UI.toast(
+      'Click each corner of the roof. <b>Double-click</b>, or click the first ' +
+      'point, to close the shape. <b>Esc</b> cancels.', 'warn', 9000);
+  }
+
+  function onDrawKey(e) { if (e.key === 'Escape') cancelDraw(true); }
+
+  function onDrawClick(e) {
+    if (!draw) return;
+    // Clicking the first vertex closes the shape, like every drawing tool.
+    if (draw.pts.length >= 3 &&
+        map.latLngToContainerPoint(e.latlng)
+           .distanceTo(map.latLngToContainerPoint(draw.pts[0])) < 10) {
+      finishDraw();
+      return;
+    }
+    draw.pts.push(e.latlng);
+    draw.markers.push(L.circleMarker(e.latlng, {
+      radius: 4, color: '#facc15', weight: 2,
+      fillColor: '#facc15', fillOpacity: 1, interactive: false,
+    }).addTo(map));
+    redrawPreview();
+  }
+
+  function redrawPreview() {
+    if (draw.preview) { map.removeLayer(draw.preview); draw.preview = null; }
+    if (draw.pts.length >= 2) {
+      draw.preview = L.polygon(draw.pts, {
+        color: '#facc15', weight: 2, dashArray: '5 4',
+        fillColor: '#facc15', fillOpacity: 0.15, interactive: false,
+      }).addTo(map);
+    }
+  }
+
+  /** The second click of a double-click already added a vertex; drop it. */
+  function onDrawFinish() {
+    if (!draw) return;
+    const marker = draw.markers.pop();
+    if (marker) map.removeLayer(marker);
+    draw.pts.pop();
+    finishDraw();
+  }
+
+  function clearDrawLayers() {
+    if (!draw) return;
+    draw.markers.forEach((m) => map.removeLayer(m));
+    if (draw.preview) map.removeLayer(draw.preview);
+  }
+
+  function cancelDraw(notify) {
+    clearDrawLayers();
+    draw = null;
+    map.getContainer().classList.remove('drawing');
+    map.doubleClickZoom.enable();
+    map.off('click', onDrawClick);
+    map.off('dblclick', onDrawFinish);
+    document.removeEventListener('keydown', onDrawKey);
+    setDrawButton(false);
+    if (notify) UI.toast('Drawing cancelled.', 'warn', 3000);
+  }
+
+  function finishDraw() {
+    const pts = draw.pts.slice();
+    cancelDraw(false);
+    if (pts.length < 3) {
+      UI.toast('A footprint needs at least 3 corners.', 'warn', 4000);
+      return;
+    }
+    // GeoJSON rings are [lon, lat] and closed. ringMetrics() and the backend
+    // both expect the closing point to be present.
+    const ring = pts.map((p) => [p.lng, p.lat]);
+    ring.push(ring[0].slice());
+    const m = ringMetrics(ring);
+    if (m.area < 5) {
+      UI.toast(`That shape is ${m.area.toFixed(1)} m² - too small to be a ` +
+               `building. Trace the roof outline, not a point.`, 'warn', 6000);
+      return;
+    }
+    createDrawnParcel(ring, m);
+  }
+
+  /**
+   * Register the traced footprint. Online it becomes a stored parcel with a
+   * real ULPIN from the backend; offline it still renders with the same
+   * deterministic local code the OSM path uses, so nothing is lost.
+   */
+  async function createDrawnParcel(ring, m) {
+    UI.showLoader('Registering parcel…', `${m.area.toFixed(0)} m² footprint`, 40);
+    let feature = null;
+    if (API.isOnline) {
+      try {
+        const r = await API.createParcel({
+          geometry: { type: 'Polygon', coordinates: [ring] },
+          name: 'Drawn parcel',
+          building_type: 'residential',
+        });
+        feature = r.data;
+      } catch (e) {
+        UI.toast(`Backend could not register it (${e.message}). ` +
+                 `Kept on screen for this session only.`, 'warn', 7000);
+      }
+    }
+    if (!feature) {
+      feature = featureFromOSM({
+        el: { type: 'manual', id: Date.now() % 9999 },
+        // name is supplied so the offline fallback is not labelled
+        // "Yes (OSM manual/1234)" by featureFromOSM's tag-derived default.
+        tags: { building: 'yes', name: 'Drawn parcel' },
+        ring,
+      }, 0);
+    }
+    UI.hideLoader();
+
+    const layer = addFeature(feature);
+    select(feature, layer);
+    UI.toast(
+      `<b>${feature.properties.ulpin}</b> · ` +
+      `${feature.properties.total_floors} floors · ` +
+      `${feature.properties.total_units} units · ${m.area.toFixed(0)} m²`,
+      'success', 8000);
+  }
+
   return {
     init, generateForRadius, updateRadiusPreview, searchLocation,
     gotoUlpin, looksLikeUlpin, parseUlpin, addFeature,
+    toggleDraw, drawActive,
     exportGeoJSON, exportCSV, calcFloors, estimateHeight, ringMetrics,
     get map() { return map; },
     get selected() { return selected; },

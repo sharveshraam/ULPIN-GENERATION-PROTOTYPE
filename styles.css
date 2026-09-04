@@ -282,3 +282,7 @@ input:focus, select:focus { outline: none; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
   [data-reveal] { opacity: 1; transform: none; }
 }
+
+/* Draw-a-footprint mode: the whole map becomes the drawing surface. */
+.leaflet-container.drawing,
+.leaflet-container.drawing * { cursor: crosshair !important; }

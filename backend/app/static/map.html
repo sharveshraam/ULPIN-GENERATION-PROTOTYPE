@@ -93,6 +93,18 @@
                     Generate ULPINs
                 </button>
 
+                <!-- OpenStreetMap is the data source, not the imagery: where OSM
+                     has no footprints a scan finds nothing. This traces a roof
+                     by hand and registers it, so unmapped areas still work. -->
+                <button id="drawBtn" onclick="MapApp.toggleDraw()"
+                    class="btn-ghost w-full py-2.5 rounded-xl text-sm mt-2">
+                    Draw a footprint
+                </button>
+                <p class="text-[10px] text-slate-500 mt-2 leading-relaxed">
+                    See a roof OpenStreetMap hasn't mapped? Trace its corners and it
+                    gets a real ULPIN.
+                </p>
+
                 <!-- Data export: collapsed by default so it stays out of the way. -->
                 <details class="pt-3 border-t border-white/10 group">
                     <summary class="text-[10px] uppercase tracking-[.16em] text-slate-500 font-semibold
