@@ -247,11 +247,13 @@ const MapApp = (() => {
       let features = [];
       let viaBackend = false;
 
+      let diag = null;
       if (API.isOnline) {
         try {
           UI.showLoader('Generating ULPINs…', 'Backend is processing the radius', 45);
           const r = await API.bulkGenerate({ lat: c.lat, lon: c.lng, radiusKm: km, persist: true });
           features = r.data.buildings.features || [];
+          diag = r.data.diagnostics || null;
           viaBackend = true;
         } catch (e) {
           UI.toast(`Backend failed (${e.message}). Falling back to browser processing.`, 'warn', 5000);
@@ -268,6 +270,37 @@ const MapApp = (() => {
       if (features.length > CONFIG.maxBuildings) {
         UI.toast(`Showing the first ${CONFIG.maxBuildings} of ${features.length} buildings.`, 'warn', 5000);
         features = features.slice(0, CONFIG.maxBuildings);
+      }
+
+      // An empty scan is not a success. The roofs on the satellite image are
+      // Esri imagery; the footprints come from OpenStreetMap, and rural India
+      // has coverage holes where a 100 m circle genuinely holds none. Say so,
+      // and say what to do about it, instead of ticking "0 buildings".
+      if (!features.length) {
+        UI.hideLoader();
+        const d = diag;
+        if (d && d.wider_count > 0) {
+          UI.toast(
+            `No OpenStreetMap footprints in this <b>${km} km</b> circle, but ` +
+            `<b>${d.wider_count.toLocaleString()}</b> exist within ` +
+            `<b>${d.wider_radius_km} km</b>. The satellite image is not the data ` +
+            `source - widen the scan radius and try again.`,
+            'warn', 9000);
+        } else if (d && d.wider_count === 0) {
+          UI.toast(
+            `OpenStreetMap has no building footprints mapped anywhere within ` +
+            `<b>${d.wider_radius_km} km</b> of this point, even though roofs are ` +
+            `visible in the imagery. This area is not in OSM yet.`,
+            'warn', 9000);
+        } else if (d && d.wider_count === -1) {
+          UI.toast('OpenStreetMap could not be reached to check coverage.', 'warn', 7000);
+        } else {
+          UI.toast(
+            `No OpenStreetMap building footprints in this circle. The imagery is ` +
+            `not the data source - try a larger radius or a mapped town.`,
+            'warn', 9000);
+        }
+        return;
       }
 
       UI.showLoader('Rendering…', `${features.length} parcels`, 92);

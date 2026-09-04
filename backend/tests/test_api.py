@@ -339,6 +339,96 @@ def test_bulk_radius_limit_enforced():
     assert r.status_code == 422  # schema caps at 5 km
 
 
+def test_bulk_generate_empty_scan_is_a_featurecollection(monkeypatch):
+    """An empty scan must speak the same shape as a populated one.
+
+    It used to return "buildings": [], which made data.buildings.features
+    undefined on every client that reads the collection - the map then showed
+    a cheerful "0 buildings" with no way to tell a coverage hole from a crash.
+    """
+    async def fake_fetch(lat, lon, radius_km):
+        return []
+
+    async def fake_reverse(lat, lon):
+        return {"display_name": "nowhere"}
+
+    async def fake_count(lat, lon, radius_km):
+        return 749
+
+    monkeypatch.setattr("app.services.osm_fetcher.fetch_buildings_in_radius", fake_fetch)
+    monkeypatch.setattr("app.services.osm_fetcher.reverse_geocode", fake_reverse)
+    monkeypatch.setattr("app.services.osm_fetcher.count_buildings_in_radius", fake_count)
+
+    r = client.post("/api/v1/bulk-generate", json={
+        "center_lat": 9.9816, "center_lon": 76.2999, "radius_km": 0.1, "persist": True,
+    })
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["buildings"] == {"type": "FeatureCollection", "features": []}
+    assert data["processed"] == 0
+    # ...and it must explain itself: roofs are visible, footprints are not.
+    assert data["diagnostics"]["wider_count"] == 749
+    assert data["diagnostics"]["wider_radius_km"] >= 0.4
+    assert data["diagnostics"]["source"] == "openstreetmap"
+
+
+def test_bulk_generate_empty_scan_when_osm_unreachable(monkeypatch):
+    async def fake_fetch(lat, lon, radius_km):
+        return []
+
+    async def fake_reverse(lat, lon):
+        return {"display_name": "nowhere"}
+
+    async def fake_count(lat, lon, radius_km):
+        return -1
+
+    monkeypatch.setattr("app.services.osm_fetcher.fetch_buildings_in_radius", fake_fetch)
+    monkeypatch.setattr("app.services.osm_fetcher.reverse_geocode", fake_reverse)
+    monkeypatch.setattr("app.services.osm_fetcher.count_buildings_in_radius", fake_count)
+
+    r = client.post("/api/v1/bulk-generate", json={
+        "center_lat": 9.9816, "center_lon": 76.2999, "radius_km": 0.1,
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["diagnostics"]["wider_count"] == -1
+
+
+def test_empty_overpass_scan_is_not_cached(monkeypatch):
+    """An empty answer must not be frozen into the cache for the full TTL.
+
+    A half-loaded Overpass shard or a coverage hole would otherwise pin
+    "0 buildings" onto an area that does have footprints.
+    """
+    import asyncio
+    from app.services import osm_fetcher as osm
+
+    calls = {"n": 0, "payload": {"elements": []}}
+
+    async def fake_post(query):
+        calls["n"] += 1
+        return calls["payload"]
+
+    monkeypatch.setattr("app.services.osm_fetcher._post_overpass", fake_post)
+    osm.clear_caches()
+
+    asyncio.run(osm.fetch_buildings_in_radius(9.98, 76.29, 0.1))
+    asyncio.run(osm.fetch_buildings_in_radius(9.98, 76.29, 0.1))
+    assert calls["n"] == 2, "an empty result must be re-queried, not served from cache"
+
+    # A populated answer still is cached: that is the whole point of the cache.
+    calls["payload"] = {"elements": [{
+        "type": "way", "id": 1,
+        "tags": {"building": "house"},
+        "geometry": [{"lon": 76.29, "lat": 9.98}, {"lon": 76.2901, "lat": 9.98},
+                     {"lon": 76.2901, "lat": 9.9801}, {"lon": 76.29, "lat": 9.98}],
+    }]}
+    asyncio.run(osm.fetch_buildings_in_radius(9.98, 76.29, 0.1))
+    n_after = calls["n"]
+    asyncio.run(osm.fetch_buildings_in_radius(9.98, 76.29, 0.1))
+    assert calls["n"] == n_after, "a populated result must come from the cache"
+    osm.clear_caches()
+
+
 def test_osm_failure_returns_503(monkeypatch):
     from app.services.osm_fetcher import OSMError
 

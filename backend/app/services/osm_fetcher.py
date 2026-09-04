@@ -264,8 +264,53 @@ async def fetch_buildings_in_radius(
         return _parse_elements(await _post_overpass(query))
 
     features = await _single_flight(key, _do)
-    _overpass_cache.set(key, features)
+    # Only non-empty answers are cached. An empty one is usually a coverage
+    # hole or a half-loaded Overpass shard, and caching it for the full TTL
+    # would freeze "0 buildings" onto an area that does have footprints.
+    if features:
+        _overpass_cache.set(key, features)
     return features
+
+
+def _count_query(filter_clause: str) -> str:
+    return (
+        f"[out:json][timeout:{int(settings.http_timeout)}];"
+        f'(way["building"]{filter_clause};'
+        f'relation["building"]{filter_clause};);'
+        f"out count;"
+    )
+
+
+async def count_buildings_in_radius(
+    center_lat: float, center_lon: float, radius_km: float
+) -> int:
+    """How many OSM footprints exist within radius_km, without downloading them.
+
+    Used to tell "there is nothing mapped here" apart from "nothing in this
+    particular circle": an empty scan whose 4x neighbourhood holds hundreds of
+    buildings is a radius problem, not a data problem.
+    """
+    radius_m = max(1, int(radius_km * 1000))
+    key = f"c:{center_lat:.5f}:{center_lon:.5f}:{radius_m}"
+    cached = _overpass_cache.get(key)
+    if cached is not None:
+        return cached[0]
+
+    async def _do() -> list[int]:
+        data = await _post_overpass(
+            _count_query(f"(around:{radius_m},{center_lat},{center_lon})")
+        )
+        for el in data.get("elements") or []:
+            if el.get("type") == "count":
+                return [int((el.get("tags") or {}).get("total", 0))]
+        return [0]
+
+    try:
+        count = (await _single_flight(key, _do))[0]
+    except OSMError:
+        return -1                     # cannot say: Overpass unreachable
+    _overpass_cache.set(key, [count])  # a count is stable; safe to cache
+    return count
 
 
 async def fetch_buildings_in_bbox(
@@ -285,7 +330,11 @@ async def fetch_buildings_in_bbox(
         return _parse_elements(await _post_overpass(query))
 
     features = await _single_flight(key, _do)
-    _overpass_cache.set(key, features)
+    # Only non-empty answers are cached. An empty one is usually a coverage
+    # hole or a half-loaded Overpass shard, and caching it for the full TTL
+    # would freeze "0 buildings" onto an area that does have footprints.
+    if features:
+        _overpass_cache.set(key, features)
     return features
 
 

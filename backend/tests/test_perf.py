@@ -663,9 +663,18 @@ def test_concurrent_identical_overpass_calls_collapse_into_one(monkeypatch):
 def test_repeat_overpass_call_is_served_from_cache(monkeypatch):
     calls = {"n": 0}
 
+    # A populated answer: empty results are deliberately NOT cached (see
+    # test_empty_overpass_scan_is_not_cached), so they cannot exercise this.
+    one_building = {"elements": [{
+        "type": "way", "id": 1,
+        "tags": {"building": "house"},
+        "geometry": [{"lon": 22.0, "lat": 11.0}, {"lon": 22.001, "lat": 11.0},
+                     {"lon": 22.001, "lat": 11.001}, {"lon": 22.0, "lat": 11.0}],
+    }]}
+
     async def fake_post(query):
         calls["n"] += 1
-        return {"elements": []}
+        return one_building
 
     monkeypatch.setattr(osm, "_post_overpass", fake_post)
     osm.clear_caches()

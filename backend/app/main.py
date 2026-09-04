@@ -700,7 +700,11 @@ async def _bulk_from_features(
     """
     found = len(features)
     if not found:
-        return {"processed": 0, "created": 0, "skipped": 0, "buildings": []}
+        # Same FeatureCollection shape as the non-empty answer. A bare list
+        # here made `data.buildings.features` undefined for every client that
+        # reads the collection, which is indistinguishable from a crash.
+        return {"processed": 0, "created": 0, "skipped": 0,
+                "buildings": {"type": "FeatureCollection", "features": []}}
 
     cap = settings.max_buildings_per_request
     features = features[:cap]
@@ -764,6 +768,21 @@ async def bulk_generate(payload: BulkGenerateRequest):
     result = await _bulk_from_features(
         features, payload.persist, payload.generate_breakdown, payload.building_type_default
     )
+    if result["processed"] == 0:
+        # The satellite imagery behind the map is not the data source: the
+        # footprints come from OpenStreetMap, and in rural India a 100 m
+        # circle can legitimately hold zero of them while roofs are plainly
+        # visible. Say which of the two cases this is, with one cheap count
+        # query at a wider radius, so "0 buildings" stops being a dead end.
+        wider_km = min(settings.max_radius_km, max(payload.radius_km * 4, 0.5))
+        wider = await osm.count_buildings_in_radius(
+            payload.center_lat, payload.center_lon, wider_km
+        )
+        result["diagnostics"] = {
+            "wider_radius_km": wider_km,
+            "wider_count": wider,        # -1 => Overpass unreachable
+            "source": "openstreetmap",
+        }
     logger.info(
         "bulk-generate r=%skm: %s found, %s created",
         payload.radius_km, result["processed"], result["created"],
