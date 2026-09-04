@@ -14,6 +14,15 @@
 const API = (() => {
 
   function resolveBase() {
+    // The backend mounts this UI at /app/ (see main.py and render.yaml). If the
+    // page was served from there then the API is on this origin by definition:
+    // no static host serves /app/, and GitHub Pages serves the repo root
+    // instead. Decide it HERE, synchronously, so the very first API call goes
+    // to the right server instead of waiting for checkHealth() to work it out -
+    // otherwise clicking "Generate" during a slow probe talks to whatever
+    // config.js happens to point at.
+    if (typeof location !== 'undefined' && /^\/app(\/|$)/.test(location.pathname || '')) return '';
+
     let configured = (typeof window !== 'undefined' && window.API_BASE_URL) || '';
     configured = configured.trim().replace(/\/+$/, '');
 
@@ -66,6 +75,9 @@ const API = (() => {
   // reads as "offline" on a server that is merely busy - it also stops the
   // sweep from ever reaching the "/" fallback. Keep it generous.
   const WARM_PROBE_TIMEOUT_MS = 8000;
+  // Long enough that a warm same-origin server always answers inside it, short
+  // enough that falling back to the configured URL does not feel broken.
+  const SAME_ORIGIN_PROBE_MS = 4000;
   const COLD_START_BUDGET_MS = 75000;
   const HEALTH_PATH_KEY = 'ulpin.healthPath';
 
@@ -99,6 +111,51 @@ const API = (() => {
   }
 
   const url = (path) => `${BASE}${path}`;
+
+  /**
+   * Ask OUR OWN origin whether it serves the API.
+   *
+   * config.js pins one absolute deployment URL, which is right for GitHub
+   * Pages and wrong everywhere else. Opened from the backend itself - /app/ on
+   * Render, a local `uvicorn`, a review deployment, a tunnel, a preview - that
+   * constant still points at production, so the page in front of you silently
+   * talks to a different server than the one that served it. That is how a
+   * working backend comes up as "Browser mode".
+   *
+   * The server that served the page is the one to trust, so it is tried first
+   * and the configured URL is only a fallback.
+   *
+   * @returns {object|null} the health document if this origin has the API
+   */
+  async function probeSameOrigin() {
+    for (const path of HEALTH_PATHS) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), SAME_ORIGIN_PROBE_MS);
+      try {
+        const res = await fetch(path, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+          signal: ctrl.signal,
+        });
+        if (!res.ok) continue;              // 404 on a static host: no API here
+        const text = await res.text();
+        let body;
+        try { body = text ? JSON.parse(text) : {}; } catch { continue; }  // HTML, not an API
+        const r = asHealth(body, path);
+        if (r && r.status === 'ok') { rememberHealthPath(path); return r; }
+      } catch (err) {
+        // A timeout means a real application server is sitting there and is
+        // merely asleep - which is exactly the case the cold-start loop below
+        // exists for. Prefer it over a production URL that would answer.
+        if (err && err.name === 'AbortError') return 'sleeping';
+        // An instant TypeError is a blocker or a dead origin: try the next path.
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return null;
+  }
 
   /**
    * Distinguish "a browser extension cancelled this" from "the server is slow
@@ -206,8 +263,24 @@ const API = (() => {
     async checkHealth(onWaking) {
       lastFailure = null;
 
-      // Nothing to wake if no backend is configured at all.
-      if (!BASE) { lastFailure = 'unconfigured'; online = false; return null; }
+      // An empty BASE means "same origin", which is a perfectly good place for
+      // the API to live - it is where /app/ on Render puts it. This used to
+      // bail out here as 'unconfigured', so the pill read "Browser mode" on a
+      // deployment whose backend was serving the page itself.
+      //
+      // A non-empty BASE is cross-origin (GitHub Pages, or a preview of one
+      // deployment opened from another). Check our own origin first: if it
+      // serves the API, use it and ignore the constant in config.js.
+      if (BASE) {
+        const same = await probeSameOrigin();
+        if (same === 'sleeping') {
+          BASE = '';                 // our own server, just not awake yet
+        } else if (same) {
+          BASE = '';
+          online = true;
+          return same;
+        }
+      }
 
       // Fast path: a warm backend answers well inside this.
       //
@@ -217,6 +290,7 @@ const API = (() => {
       // through - the request is only being judged on its URL.
       let blockedAll = true;
       let anyResponse = false;
+      let sawHang = false;             // something timed out => a server is there
       for (const path of probeOrder()) {
         const started = Date.now();
         try {
@@ -237,6 +311,7 @@ const API = (() => {
           // cannot help a blocked request and reporting "offline" sends
           // people to debug a server that is perfectly fine.
           if (!isLikelyBlocked(err, Date.now() - started)) blockedAll = false;
+          if (err && err.name === 'AbortError') sawHang = true;
           // Keep trying the remaining paths either way: a 404 just means this
           // deployment predates that alias, and a timeout on one path says
           // nothing about whether another is blocked.
@@ -249,6 +324,17 @@ const API = (() => {
       // cares whether the server answered, so it tells the two apart.
       if (blockedAll && !anyResponse) {
         lastFailure = (await serverIsReachable()) ? 'cors' : 'blocked';
+        online = false;
+        return null;
+      }
+
+      // Nothing timed out, so nothing is asleep: the origin answered promptly
+      // with something that is not this API (a static host, a 404, a splash
+      // page). Polling it for 75 s cannot change that answer, and on GitHub
+      // Pages it would leave the pill stuck on "Waking backend..." for over a
+      // minute before admitting there is no backend here at all.
+      if (!sawHang) {
+        lastFailure = 'unreachable';
         online = false;
         return null;
       }
