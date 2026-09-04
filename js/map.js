@@ -20,9 +20,11 @@ const MapApp = (() => {
 
   let map, parcelLayer, radiusCircle, selectedLayer = null;
   let buildings = [];               // current feature list
+  let buildingIds = new Set();      // ulpin -> membership, so addFeature is O(1)
   let selected = null;
   let busy = false;
   let layerIndex = new Map();       // ulpin -> Leaflet layer, for ULPIN lookup
+  let mainGroup = null;             // featureGroup holding the last batch render
 
   /* ------------------------- Height / floor rules -------------------------
      Mirrors backend/app/services/model_3d_generator.py so offline results
@@ -270,6 +272,8 @@ const MapApp = (() => {
 
       UI.showLoader('Rendering…', `${features.length} parcels`, 92);
       buildings = features;
+      // Keep the membership set in sync with the list addFeature() consults.
+      buildingIds = new Set(buildings.map(f => String(f.properties.ulpin)));
       renderBuildings(features);
 
       const secs = ((performance.now() - t0) / 1000).toFixed(1);
@@ -312,20 +316,35 @@ const MapApp = (() => {
       const layer = L.polygon(coords, styleFor(f));
       layer._feature = f;
       if (f.properties.ulpin) layerIndex.set(String(f.properties.ulpin), layer);
-      layer.on('mouseover', () => layer.setStyle({ fillOpacity: 0.7, weight: 2.5 }));
-      layer.on('mouseout', () => { if (layer !== selectedLayer) layer.setStyle(styleFor(f)); });
-      layer.on('click', () => select(f, layer));
-      // Tooltips bound lazily; binding thousands upfront is slow.
-      layer.once('mouseover', () => {
-        layer.bindTooltip(
-          `${f.properties.name} · ${f.properties.total_floors} fl`,
-          { className: 'parcel-tip', sticky: true, direction: 'top' }
-        ).openTooltip();
-      });
       return layer;
     });
 
-    parcelLayer.addLayer(L.featureGroup(layers));
+    // ONE set of listeners for the whole batch instead of four per polygon.
+    // A 5 000-building radius used to register 20 000 handlers, which cost
+    // more CPU than drawing the polygons did. L.featureGroup re-fires child
+    // events with `e.layer` set, so the behaviour is identical.
+    const group = L.featureGroup(layers);
+    group.on('mouseover', (e) => {
+      const layer = e.layer, f = layer._feature;
+      // Tooltips are built on first hover; binding thousands upfront is slow.
+      // Leaflet's own mouseover->openTooltip wiring is installed by
+      // bindTooltip, so it only has to be opened by hand this first time.
+      if (!layer.getTooltip()) {
+        layer.bindTooltip(
+          `${f.properties.name} · ${f.properties.total_floors} fl`,
+          { className: 'parcel-tip', sticky: true, direction: 'top' }
+        ).openTooltip(e.latlng);
+      }
+      layer.setStyle({ fillOpacity: 0.7, weight: 2.5 });
+    });
+    group.on('mouseout', (e) => {
+      const layer = e.layer;
+      if (layer !== selectedLayer) layer.setStyle(styleFor(layer._feature));
+    });
+    group.on('click', (e) => select(e.layer._feature, e.layer));
+
+    mainGroup = group;
+    parcelLayer.addLayer(group);
     updateStats(features);
   }
 
@@ -333,15 +352,21 @@ const MapApp = (() => {
     const bar = document.getElementById('statsBar');
     if (!bar) return;
     if (!features.length) { bar.classList.add('hidden'); return; }
-    const floors = features.map(f => f.properties.total_floors);
-    const units = features.reduce((s, f) => s + f.properties.total_units, 0);
-    const tagged = features.filter(f => (f.properties.height_source || '').startsWith('OSM')).length;
-    const tallest = features.reduce((a, b) => b.properties.total_floors > a.properties.total_floors ? b : a);
+    // One pass: this used to walk the list four times (map, reduce, filter,
+    // reduce), and Math.max(...floors) spreads the whole array into the
+    // argument list, which is both slow and stack-limited at 6 000 entries.
+    let units = 0, tagged = 0, maxFloors = 0, tallest = features[0];
+    for (const f of features) {
+      const p = f.properties;
+      units += p.total_units;
+      if ((p.height_source || '').startsWith('OSM')) tagged++;
+      if (p.total_floors > maxFloors) { maxFloors = p.total_floors; tallest = f; }
+    }
     bar.innerHTML =
       `<b class="text-sky-300">${features.length.toLocaleString()}</b> buildings` +
       `<span class="dot"></span><b class="text-indigo-300">${units.toLocaleString()}</b> units` +
       `<span class="dot"></span><b class="text-emerald-300">${Math.round(tagged / features.length * 100)}%</b> OSM-tagged` +
-      `<span class="dot"></span><b class="text-amber-300">${Math.max(...floors)}</b> max floors` +
+      `<span class="dot"></span><b class="text-amber-300">${maxFloors}</b> max floors` +
       `<span class="dot"></span><span class="text-slate-500 truncate">${tallest.properties.name}</span>`;
     bar.classList.remove('hidden');
   }
@@ -454,12 +479,19 @@ const MapApp = (() => {
     const coords = f.geometry.coordinates[0].map(([lon, lat]) => [lat, lon]);
     const layer = L.polygon(coords, styleFor(f));
     layer._feature = f;
-    layer.on('click', () => select(f, layer));
-    layer.bindTooltip(`${f.properties.name} · ${f.properties.total_floors} fl`,
-      { className: 'parcel-tip', sticky: true, direction: 'top' });
-    parcelLayer.addLayer(layer);
+    if (mainGroup) {
+      // Inherits the batch's delegated click/hover/tooltip handling, so a
+      // single feature costs no extra listeners.
+      mainGroup.addLayer(layer);
+    } else {
+      layer.on('click', () => select(f, layer));
+      layer.bindTooltip(`${f.properties.name} · ${f.properties.total_floors} fl`,
+        { className: 'parcel-tip', sticky: true, direction: 'top' });
+      parcelLayer.addLayer(layer);
+    }
     layerIndex.set(id, layer);
-    if (!buildings.some(b => String(b.properties.ulpin) === id)) buildings.push(f);
+    // Set lookup: buildings.some(...) here made a batch of N adds O(N^2).
+    if (!buildingIds.has(id)) { buildingIds.add(id); buildings.push(f); }
     return layer;
   }
 

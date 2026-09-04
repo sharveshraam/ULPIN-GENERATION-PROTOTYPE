@@ -15,6 +15,9 @@ So the rule here is:
 """
 from __future__ import annotations
 
+import json
+import threading
+from collections import OrderedDict
 from typing import Any, Optional
 
 from . import geometry_processor as geo
@@ -170,6 +173,89 @@ def calculate_floors_and_units(
     }
 
 
+# --------------------------------------------------------------------------- #
+# Result cache
+#
+# Opening the 3D modal for the same building twice (or two visitors looking at
+# the same landmark) recomputed an identical model. On ~0.1 CPU that is the
+# difference between an instant panel and a multi-second spin, so keep a small
+# bounded LRU. Entries are capped by count AND by estimated size, because a
+# 512 MB free-tier instance must not be traded for a faster second request.
+#
+# A cache hit hands back the SAME dict object. That is safe here because the
+# only consumer serialises it straight into a response and never mutates it;
+# keep it that way if this ever gains another caller.
+# --------------------------------------------------------------------------- #
+_CACHE_MAX_ENTRIES = 48
+_CACHE_MAX_ENTRY_BYTES = 2_000_000
+_model_cache: "OrderedDict[tuple, dict]" = OrderedDict()
+_cache_lock = threading.Lock()
+_cache_stats = {"hits": 0, "misses": 0}
+
+
+def _cache_key(geometry: dict, base_ulpin: str, height_m: Optional[float],
+               building_type: str, explicit_levels: Optional[int],
+               unit_area_override: Optional[float], include_unit_geometry: bool,
+               include_units: bool, max_unit_geometry: int) -> Optional[tuple]:
+    """Hashable key for a model request, or None if it is not worth caching."""
+    try:
+        return (
+            json.dumps(geometry, sort_keys=True, separators=(",", ":")),
+            base_ulpin, height_m, building_type, explicit_levels,
+            unit_area_override, include_unit_geometry, include_units,
+            max_unit_geometry,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _cache_get(key: tuple) -> Optional[dict]:
+    with _cache_lock:
+        hit = _model_cache.get(key)
+        if hit is None:
+            _cache_stats["misses"] += 1
+            return None
+        _model_cache.move_to_end(key)
+        _cache_stats["hits"] += 1
+        return hit
+
+
+def _estimate_size(model: dict) -> int:
+    """O(1) payload estimate, good enough to decide whether to cache.
+
+    Serialising the model just to measure it cost more than building it: a
+    37 MB tower model spent 100 ms in ``json.dumps`` to answer "is this too
+    big to cache?". Size follows directly from the record counts instead.
+    """
+    units = model.get("units") or []
+    # A unit record is ~120 B of JSON, or ~400 B when it carries a footprint.
+    per_unit = 400 if (units and "geometry" in units[0]) else 120
+    return (len(units) * per_unit
+            + len(model.get("floors") or ()) * 200
+            + len((model.get("geometry_3d") or {}).get("features") or ()) * 400
+            + 400)
+
+
+def _cache_put(key: tuple, value: dict) -> None:
+    if _estimate_size(value) > _CACHE_MAX_ENTRY_BYTES:
+        return
+    with _cache_lock:
+        _model_cache[key] = value
+        _model_cache.move_to_end(key)
+        while len(_model_cache) > _CACHE_MAX_ENTRIES:
+            _model_cache.popitem(last=False)
+
+
+def cache_stats() -> dict[str, int]:
+    with _cache_lock:
+        return {**_cache_stats, "entries": len(_model_cache)}
+
+
+def clear_model_cache() -> None:
+    with _cache_lock:
+        _model_cache.clear()
+
+
 def generate_accurate_3d_model(
     geometry: dict,
     base_ulpin: str,
@@ -179,11 +265,57 @@ def generate_accurate_3d_model(
     unit_area_override: Optional[float] = None,
     include_unit_geometry: bool = True,
     max_unit_geometry: int = 2000,
+    include_units: bool = True,
 ) -> dict[str, Any]:
-    """Full building -> floors -> units model with 3D geometry per floor."""
-    area = geo.area_sq_m(geometry)
+    """Full building -> floors -> units model with 3D geometry per floor.
+
+    ``include_units=False`` omits the per-unit records. The floor table already
+    carries ``units_on_floor``, so a client that renders units page by page
+    (which the bundled UI does) can derive any unit ULPIN itself. For a
+    163-floor tower that is ~16k records and ~1.7 MB of JSON that nobody
+    reads, so dropping them is the single biggest saving on this endpoint.
+    """
+    key = _cache_key(
+        geometry, base_ulpin, height_m, building_type, explicit_levels,
+        unit_area_override, include_unit_geometry, include_units, max_unit_geometry,
+    )
+    if key is not None:
+        cached = _cache_get(key)
+        if cached is not None:
+            return cached
+    else:
+        _cache_stats["misses"] += 1
+
+    model = _build_model(
+        geometry=geometry, base_ulpin=base_ulpin, height_m=height_m,
+        building_type=building_type, explicit_levels=explicit_levels,
+        unit_area_override=unit_area_override,
+        include_unit_geometry=include_unit_geometry,
+        max_unit_geometry=max_unit_geometry, include_units=include_units,
+    )
+    if key is not None:
+        _cache_put(key, model)
+    return model
+
+
+def _build_model(
+    geometry: dict,
+    base_ulpin: str,
+    height_m: Optional[float],
+    building_type: str,
+    explicit_levels: Optional[int],
+    unit_area_override: Optional[float],
+    include_unit_geometry: bool,
+    max_unit_geometry: int,
+    include_units: bool,
+) -> dict[str, Any]:
+    # Parse the footprint ONCE. This used to be re-parsed and re-validated per
+    # floor: a 163-storey tower ran the same GeoJSON through shapely 165 times
+    # to produce 163 copies of the same ring at different elevations.
+    area, lat, lon = geo.measure(geometry)
     if area <= 0:
         raise ValueError("footprint area is zero; check the geometry")
+    ring = geo.exterior_ring(geometry)
 
     prof = profile_for(building_type)
     if height_m is None or height_m <= 0:
@@ -197,7 +329,6 @@ def generate_accurate_3d_model(
         unit_area_override=unit_area_override,
     )
 
-    lat, lon = geo.centroid_latlon(geometry)
     floors_out: list[dict[str, Any]] = []
     units_out: list[dict[str, Any]] = []
     features: list[dict[str, Any]] = []
@@ -206,6 +337,7 @@ def generate_accurate_3d_model(
     # the same cell layout on every floor that has the same unit count.
     subdivision_cache: dict[int, list[dict]] = {}
     emitted_geometry = 0
+    want_units = include_units or include_unit_geometry
 
     for f in breakdown["floors"]:
         fno = f["floor_number"]
@@ -215,7 +347,7 @@ def generate_accurate_3d_model(
         top = f["base_elevation_m"] + f["floor_height_m"]
         features.append({
             "type": "Feature",
-            "geometry": geo.extrude_to_3d(geometry, f["base_elevation_m"], top),
+            "geometry": geo.extrude_ring_to_3d(ring, top),
             "properties": {
                 "floor": fno,
                 "floor_ulpin": f_ulpin,
@@ -226,7 +358,7 @@ def generate_accurate_3d_model(
         })
 
         n_units = f["units_on_floor"]
-        if n_units <= 0:
+        if n_units <= 0 or not want_units:
             continue
 
         cells: list[dict] = []
@@ -235,13 +367,14 @@ def generate_accurate_3d_model(
                 subdivision_cache[n_units] = geo.subdivide_polygon(geometry, n_units)
             cells = subdivision_cache[n_units]
 
+        unit_area = round(f["floor_area_sq_m"] / n_units, 2)
         for u in range(1, n_units + 1):
             rec: dict[str, Any] = {
                 "unit_ulpin": unit_ulpin(base_ulpin, fno, u),
                 "parent_ulpin": base_ulpin,
                 "floor_number": fno,
                 "unit_number": u,
-                "area_sq_m": round(f["floor_area_sq_m"] / n_units, 2),
+                "area_sq_m": unit_area,
             }
             if cells and emitted_geometry < max_unit_geometry:
                 rec["geometry"] = cells[(u - 1) % len(cells)]

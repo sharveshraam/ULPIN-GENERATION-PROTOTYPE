@@ -60,7 +60,36 @@ const API = (() => {
   // start working. It reports liveness only - it has no database field - so
   // it is a fallback, not a replacement.
   const HEALTH_PATHS = ['/health', '/status', '/ulpin-status', '/'];
-  let healthPath = HEALTH_PATHS[0];
+
+  // Warm-pass timeout. A healthy host answers /health in ~2 ms, but a starved
+  // 0.1 CPU container can legitimately take seconds, and a tight budget here
+  // reads as "offline" on a server that is merely busy - it also stops the
+  // sweep from ever reaching the "/" fallback. Keep it generous.
+  const WARM_PROBE_TIMEOUT_MS = 8000;
+  const COLD_START_BUDGET_MS = 75000;
+  const HEALTH_PATH_KEY = 'ulpin.healthPath';
+
+  // Last path that actually answered. Remembered per tab so a returning
+  // visitor probes ONE endpoint instead of rediscovering which of the four
+  // an ad-blocker happens to allow.
+  let healthPath = null;
+
+  function rememberHealthPath(path) {
+    healthPath = path;
+    try { sessionStorage.setItem(HEALTH_PATH_KEY, path); } catch (_) { /* private mode */ }
+  }
+
+  try {
+    const saved = sessionStorage.getItem(HEALTH_PATH_KEY);
+    if (saved && HEALTH_PATHS.includes(saved)) healthPath = saved;
+  } catch (_) { /* private mode */ }
+
+  /** Probe order: whatever worked last time first, then the rest. */
+  function probeOrder() {
+    return healthPath
+      ? [healthPath, ...HEALTH_PATHS.filter((p) => p !== healthPath)]
+      : HEALTH_PATHS;
+  }
 
   /** Normalise a probe response: "/" returns the API banner, not a health doc. */
   function asHealth(body, path) {
@@ -188,14 +217,14 @@ const API = (() => {
       // through - the request is only being judged on its URL.
       let blockedAll = true;
       let anyResponse = false;
-      for (const path of HEALTH_PATHS) {
+      for (const path of probeOrder()) {
         const started = Date.now();
         try {
-          const r = asHealth(await request(path, {}, 8000), path);
+          const r = asHealth(await request(path, {}, WARM_PROBE_TIMEOUT_MS), path);
           anyResponse = true;
           if (r.status === 'ok') {
             online = true;
-            healthPath = path;
+            rememberHealthPath(path);
             return r;
           }
           // Transport succeeded but the body is not a health payload (e.g. a
@@ -227,20 +256,44 @@ const API = (() => {
       if (typeof onWaking === 'function') { try { onWaking(); } catch (_) {} }
 
       // Slow path: cold start. Poll until the service answers or we give up.
-      const deadline = Date.now() + 75000;
+      //
+      // Two things keep this off the host's back:
+      //   - the interval grows 2.5 -> 4 -> 6.4 -> 8 s instead of staying
+      //     pinned at 2.5 s, and each probe is bounded by what is left of the
+      //     budget so the loop cannot overshoot it by a whole timeout;
+      //   - once an endpoint is known to work, only that one is probed rather
+      //     than the whole list on every pass.
+      //
+      // The sweep is still a full sweep when nothing is remembered: a waking
+      // host may answer "/" before "/health", and one of these paths may be
+      // the only one an ad-blocker lets through. Dropping it cost a host that
+      // answers every request but not with a health document its "/" fallback,
+      // which is why it stays.
+      //
+      // Measured with a fake clock (see tests/test_frontend_health.mjs): a
+      // first-time visitor against a sleeping host issues the same number of
+      // requests either way, because asHealth() reports "/" as live and ends
+      // the loop after one pass. The remembered path is what pays - a repeat
+      // visitor whose /health is ad-blocked goes from 2 requests and an 8 s
+      // hang to 1 request and none.
+      const deadline = Date.now() + COLD_START_BUDGET_MS;
+      let delay = 2500;
       let blockedStreak = 0;
-      while (Date.now() < deadline) {
-        // Re-probe every path, not just the first. A waking host may answer
-        // one path before another, and one of these may be the only one the
-        // browser is willing to send.
+      while (true) {
+        // Bound each probe by what is left of the budget, so the loop cannot
+        // overshoot it by a full timeout on the way out.
+        const remaining = deadline - Date.now();
+        if (remaining < 1000) break;
+        const timeout = Math.min(20000, remaining);
+        const paths = healthPath ? [healthPath] : HEALTH_PATHS;
         let sawReal = false;
-        for (const path of HEALTH_PATHS) {
+        for (const path of paths) {
           const attempt = Date.now();
           try {
-            const r = asHealth(await request(path, {}, 20000), path);
+            const r = asHealth(await request(path, {}, timeout), path);
             if (r.status === 'ok') {
               online = true;
-              healthPath = path;
+              rememberHealthPath(path);
               return r;
             }
             sawReal = true;   // got an HTTP response; server is alive
@@ -248,9 +301,8 @@ const API = (() => {
             if (!isLikelyBlocked(err, Date.now() - attempt)) sawReal = true;
           }
         }
-        // Consistent instant rejections across every path mean a client-side
-        // blocker (or CORS), not a cold start. Bail out rather than spin for
-        // the budget.
+        // Consistent instant rejections mean a client-side blocker (or CORS),
+        // not a cold start. Bail out rather than spin for the whole budget.
         if (!sawReal) {
           if (++blockedStreak >= 2) {
             lastFailure = (await serverIsReachable()) ? 'cors' : 'blocked';
@@ -260,7 +312,8 @@ const API = (() => {
         } else {
           blockedStreak = 0;
         }
-        await new Promise(res => setTimeout(res, 2500));
+        await new Promise(res => setTimeout(res, delay));
+        delay = Math.min(delay * 1.6, 8000);
       }
       lastFailure = (await serverIsReachable()) ? 'cors' : 'unreachable';
       online = false;

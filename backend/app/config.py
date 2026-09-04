@@ -122,9 +122,62 @@ class Settings:
         # Simple in-process rate limit.
         self.rate_limit_requests: int = _env_int("RATE_LIMIT_REQUESTS", 60)
         self.rate_limit_window_s: int = _env_int("RATE_LIMIT_WINDOW_S", 60)
+        # Bound the client table so a long-lived process cannot grow it without
+        # limit: one deque per distinct IP, forever, is a slow memory leak.
+        self.rate_limit_max_clients: int = _env_int("RATE_LIMIT_MAX_CLIENTS", 4096)
 
         # Storing every unit of a 163-floor tower is a lot of rows; cap what we persist.
         self.persist_units_limit: int = _env_int("PERSIST_UNITS_LIMIT", 4000)
+
+        # --- Database -----------------------------------------------------
+        # Sized to cover Starlette's worker threadpool (40 by default) so a
+        # request never has to wait for a connection, while pool_timeout keeps
+        # a pathological pile-up from hanging indefinitely.
+        self.db_pool_size: int = _env_int("DB_POOL_SIZE", 10)
+        self.db_max_overflow: int = _env_int("DB_MAX_OVERFLOW", 20)
+        self.db_pool_timeout_s: int = _env_int("DB_POOL_TIMEOUT_S", 10)
+
+        # SQLite tuning. WAL lets readers run during a bulk write, which is
+        # what keeps the health probe answering mid-scan.
+        self.sqlite_busy_timeout_s: float = _env_float("SQLITE_BUSY_TIMEOUT_S", 5.0)
+        self.sqlite_synchronous: str = _env("SQLITE_SYNCHRONOUS", "NORMAL")
+        self.sqlite_cache_size_kib: int = _env_int("SQLITE_CACHE_SIZE_KIB", -2000)
+        self.sqlite_mmap_mib: int = _env_int("SQLITE_MMAP_MIB", 64)
+
+        # --- Caching ------------------------------------------------------
+        # Every one of these trades a little staleness for CPU that Render's
+        # free tier does not have. Set a TTL to 0 to disable that cache.
+        self.cache_osm_s: int = _env_int("CACHE_OSM_S", 900)
+        self.cache_geocode_s: int = _env_int("CACHE_GEOCODE_S", 86400)
+        self.cache_health_s: float = _env_float("CACHE_HEALTH_S", 15.0)
+        self.cache_max_entries: int = _env_int("CACHE_MAX_ENTRIES", 256)
+        # Snap a coordinate to this many decimals before using it as a cache
+        # key. 3 dp is ~110 m, well inside one administrative area, so two
+        # nearby buildings share a reverse-geocode instead of each paying for
+        # one (and for Nominatim's 1 req/s politeness limit).
+        self.geocode_key_precision: int = _env_int("GEOCODE_KEY_PRECISION", 3)
+
+        # --- Response encoding --------------------------------------------
+        # gzip costs CPU, so it is only worth it above a threshold; below it
+        # the compression burns more of Render's 0.1 CPU than it saves.
+        #
+        # Level 4 is the knee of the curve on this API's real payloads. For a
+        # 352 KB bulk response: level 1 = 1.7 ms -> 71 KB, level 4 = 3.2 ms ->
+        # 66 KB, level 6 = 5.7 ms -> 64 KB, level 9 = 13.4 ms -> 64 KB. Level
+        # 9 buys 3% over level 4 for 4x the CPU, which is the wrong trade when
+        # CPU is the scarce resource - and the bytes it saves still cost the
+        # browser far less time to download than the level burns to produce.
+        self.gzip_enabled: bool = _env("GZIP_ENABLED", "1") not in ("0", "false", "False", "")
+        self.gzip_minimum_size: int = _env_int("GZIP_MINIMUM_SIZE", 1024)
+        self.gzip_level: int = _env_int("GZIP_LEVEL", 4)
+
+        # --- Static frontend ----------------------------------------------
+        # The whole UI is ~200 KB across a dozen files. Holding it in memory
+        # means serving a page view costs no disk I/O and no stat() calls.
+        self.static_cache_enabled: bool = _env("STATIC_CACHE", "1") not in ("0", "false", "False", "")
+        self.static_max_file_bytes: int = _env_int("STATIC_MAX_FILE_BYTES", 4 * 1024 * 1024)
+        self.static_html_max_age: int = _env_int("STATIC_HTML_MAX_AGE", 60)
+        self.static_asset_max_age: int = _env_int("STATIC_ASSET_MAX_AGE", 86400)
 
         self.log_level: str = _env("LOG_LEVEL", "INFO")
 

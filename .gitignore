@@ -31,6 +31,12 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+# SQLite WAL sidecars. The database runs in WAL mode (see database.py), so a
+# live process leaves these next to the .db file. They are per-connection
+# runtime state, never data to commit.
+*.db-shm
+*.db-wal
+*.db-journal
 
 # ---------------------------------------------------------------------------
 # OS / editor

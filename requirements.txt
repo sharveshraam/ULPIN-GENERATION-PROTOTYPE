@@ -2,7 +2,7 @@
 #
 # Derived by AST-inspecting every project .py file under backend/ for
 # third-party imports. Only these are used at runtime:
-#   fastapi, uvicorn (server), sqlalchemy, shapely, pydantic, httpx
+#   fastapi, uvicorn (server), sqlalchemy, shapely, pydantic, httpx, orjson
 #
 # Deliberately NOT included:
 #   pyproj              - geometry_processor.py implements a local
@@ -12,6 +12,10 @@
 #   pydantic-settings   - not imported; plain helpers are used instead
 #   requests            - all HTTP is async via httpx
 #   database drivers    - SQLite ships with Python's stdlib (sqlite3)
+#
+# orjson is imported directly (Rust JSON encoder): it serialises the large
+# parcel/3D-model payloads several times faster than the stdlib and is also
+# used for SQLAlchemy's JSON columns.
 #   pytest              - test-only, see backend/requirements.txt
 
 fastapi==0.141.1
@@ -20,3 +24,4 @@ SQLAlchemy==2.0.52
 shapely==2.1.2
 pydantic==2.13.5
 httpx==0.28.1
+orjson==3.12.0

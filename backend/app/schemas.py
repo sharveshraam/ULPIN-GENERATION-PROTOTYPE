@@ -155,6 +155,11 @@ class Model3DRequest(BaseModel):
     building_type: str = "residential"
     unit_area_sq_m: Optional[float] = Field(None, gt=10, le=2000)
     include_unit_geometry: bool = True
+    # The floor table already carries `units_on_floor`, so a client that pages
+    # units itself can derive every unit ULPIN without this list. For a
+    # 163-storey tower it is ~13.8k records and ~1.8 MB of JSON - about 95% of
+    # the endpoint's cost - so the bundled UI asks for it to be omitted.
+    include_units: bool = True
 
     @field_validator("ulpin")
     @classmethod

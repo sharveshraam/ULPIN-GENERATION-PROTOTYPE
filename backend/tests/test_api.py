@@ -577,12 +577,41 @@ def asyncio_run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
+class _RawResponse:
+    """The ASGI messages a middleware produced, as a response-like object."""
+
+    def __init__(self, status_code, headers, body):
+        self.status_code = status_code
+        self.headers = headers
+        self.body = body
+
+
 async def _cors_fallback_case(origin_header: bytes | None, pre_set: str | None = None,
-                              with_credentials: bool = True, preflight: bool = False):
-    from starlette.requests import Request
+                              with_credentials: bool = True, preflight: bool = False,
+                              existing_vary: str | None = None):
+    """Drive CorsFallbackMiddleware over a canned inner ASGI app.
+
+    The middleware is pure ASGI now (BaseHTTPMiddleware allocated a task group
+    and two memory streams per request), so it is exercised through a real
+    scope/receive/send triple rather than a dispatch function.
+    """
+    from starlette.datastructures import Headers
     from starlette.responses import JSONResponse
 
-    from app.main import cors_fallback
+    from app.middleware import CorsFallbackMiddleware
+
+    async def inner(scope, receive, send):
+        # Mimic Starlette's CORSMiddleware on a rejected request: 400 without
+        # ACAO but with the credentials header it sets globally.
+        resp = (JSONResponse({"detail": "Disallowed CORS origin"}, status_code=400)
+                if preflight else JSONResponse({"ok": True}))
+        if with_credentials:
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+        if pre_set:
+            resp.headers["Access-Control-Allow-Origin"] = pre_set
+        if existing_vary:
+            resp.headers["Vary"] = existing_vary
+        await resp(scope, receive, send)
 
     headers = [(b"host", b"api.test")]
     if origin_header is not None:
@@ -591,19 +620,26 @@ async def _cors_fallback_case(origin_header: bytes | None, pre_set: str | None =
         headers += [(b"access-control-request-method", b"POST"),
                     (b"access-control-request-headers", b"content-type")]
 
-    async def call_next(_request):
-        # Mimic Starlette's CORSMiddleware on a rejected request: 400 without
-        # ACAO but with the credentials header it sets globally.
-        resp = JSONResponse({"detail": "Disallowed CORS origin"}, status_code=400) if preflight \
-            else JSONResponse({"ok": True})
-        if with_credentials:
-            resp.headers["Access-Control-Allow-Credentials"] = "true"
-        if pre_set:
-            resp.headers["Access-Control-Allow-Origin"] = pre_set
-        return resp
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+             "method": "OPTIONS" if preflight else "GET", "path": "/health",
+             "raw_path": b"/health", "query_string": b"", "root_path": "",
+             "scheme": "http", "client": ("testclient", 1), "server": ("test", 80),
+             "headers": headers}
 
-    return await cors_fallback(Request({"type": "http", "method": "OPTIONS" if preflight else "GET",
-                                        "path": "/health", "headers": headers}), call_next)
+    captured = {"status": None, "headers": None, "body": b""}
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            captured["status"] = message["status"]
+            captured["headers"] = Headers(raw=list(message["headers"]))
+        elif message["type"] == "http.response.body":
+            captured["body"] += message.get("body", b"")
+
+    await CorsFallbackMiddleware(inner)(scope, receive, send)
+    return _RawResponse(captured["status"], captured["headers"], captured["body"])
 
 
 def test_cors_fallback_echoes_unlisted_origin():
@@ -630,6 +666,14 @@ def test_cors_fallback_converts_rejected_preflight_to_200():
     assert res.headers["access-control-allow-origin"] == "https://some-unknown-site.example"
 
 
+def test_cors_fallback_drops_the_rejected_preflight_body():
+    """A preflight response must not carry the 400's JSON error body."""
+    res = asyncio_run(_cors_fallback_case(b"https://some-unknown-site.example",
+                                          preflight=True))
+    assert res.status_code == 200
+    assert res.body == b""
+
+
 def test_cors_fallback_keeps_credentials_on_echoed_origin():
     """Echoing the origin + credentials is valid, unlike '*' + credentials."""
     res = asyncio_run(_cors_fallback_case(b"https://sharveshraam.github.io",
@@ -648,6 +692,15 @@ def test_cors_fallback_ignores_requests_without_origin():
     """Server-side probes (curl, uptime checks) need no CORS header."""
     res = asyncio_run(_cors_fallback_case(None))
     assert "access-control-allow-origin" not in res.headers
+
+
+def test_cors_fallback_appends_to_vary_instead_of_clobbering():
+    """GZipMiddleware sets 'Vary: Accept-Encoding'; overwriting it would let a
+    shared cache serve gzipped bytes to a client that never advertised gzip."""
+    res = asyncio_run(_cors_fallback_case(b"https://sharveshraam.github.io",
+                                          existing_vary="Accept-Encoding"))
+    vary = res.headers["vary"].lower()
+    assert "accept-encoding" in vary and "origin" in vary
 
 
 # --------------------------------------------------------------------------- #

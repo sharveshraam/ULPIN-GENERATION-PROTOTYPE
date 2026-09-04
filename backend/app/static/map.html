@@ -7,7 +7,18 @@
     <title>Map Console — ULPIN Atlas</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+    <!-- Warm the connections the map is about to need: basemap tiles, Leaflet,
+         and the CDN three.js is fetched from when the 3D modal opens. Each
+         preconnect saves a DNS+TLS round trip on the first request. -->
+    <link rel="preconnect" href="https://server.arcgisonline.com" crossorigin>
+    <link rel="preconnect" href="https://unpkg.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <!-- Weight RANGES, not lists. Both families are variable fonts, so a
+         range asks Google for one woff2 per subset covering every weight
+         instead of one file per weight (7 requests -> 1). Rendering is
+         identical: the static instances were generated from the same font.
+         300 is dropped because nothing on the page uses it. -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..900&family=JetBrains+Mono:wght@400..600&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="tailwind.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -256,13 +267,14 @@
 
     <div id="toasts" class="fixed top-16 left-1/2 -translate-x-1/2 z-[80] space-y-2 w-[min(92vw,430px)]"></div>
 
-    <!-- Libraries -->
+    <!-- Libraries.
+         three.js (~600 KB) and OrbitControls are deliberately NOT here: only
+         the 3D modal uses them, and most visitors never open it. js/3d-viewer.js
+         fetches both the first time the viewer is opened. Pinned to three
+         r128 - the last line that ships UMD globals (build/three.min.js and
+         examples/js/*); newer releases are ES-module only, which would need an
+         importmap and break the plain-script setup used here. -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <!-- three r128: last line that ships UMD globals (build/three.min.js and
-         examples/js/*). Newer releases are ES-module only, which would need
-         an importmap and break the plain-script setup used here. -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
     <!-- App modules -->
     <script src="js/config.js"></script>

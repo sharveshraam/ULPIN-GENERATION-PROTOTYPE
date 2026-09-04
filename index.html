@@ -9,7 +9,17 @@
         content="Generate 14-digit ULPINs for building footprints and model vertical property rights floor by floor, unit by unit.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap"
+    <!-- three.js and the globe's Earth textures are fetched after 'load' from
+         these CDNs; warming the connection means the globe appears sooner
+         without the download ever blocking first paint. -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://unpkg.com" crossorigin>
+    <!-- Weight RANGES, not lists. Both families are variable fonts, so a
+         range asks Google for one woff2 per subset covering every weight
+         instead of one file per weight (7 requests -> 1). Rendering is
+         identical: the static instances were generated from the same font.
+         300 is dropped because nothing on the page uses it. -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..900&family=JetBrains+Mono:wght@400..600&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="tailwind.css">
     <link rel="stylesheet" href="styles.css">
@@ -395,11 +405,11 @@
 
     <div id="toasts" class="fixed top-20 left-1/2 -translate-x-1/2 z-[80] space-y-2 w-[min(92vw,430px)]"></div>
 
-    <!-- three.js r0.128.0 for the background globe. Pinned to match map.html:
-         r148+ removed examples/js/ and r150+ removed build/three.min.js.
-         Loaded before globe.js, which needs the THREE global. -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-
+    <!-- three.js is NOT loaded here on purpose. It is ~600 KB and the only
+         thing on this page that needs it is the decorative background globe,
+         so it is fetched after 'load' (see below) instead of blocking first
+         paint. Pinned to r0.128.0 to match map.html: r148+ removed
+         examples/js/ and r150+ removed build/three.min.js. -->
     <script src="js/config.js"></script>
     <script src="js/api.js"></script>
     <script src="js/ui.js"></script>
@@ -407,9 +417,28 @@
     <script>
         UI.initScrollReveal();
 
-        // Decorative background globe. Returns false (and changes nothing) if
-        // WebGL is unavailable or the three.js CDN was blocked.
-        Globe.init('globe');
+        // Decorative background globe. three.js is fetched only once the page
+        // has finished loading and the browser is idle, so 600 KB of library
+        // never competes with first paint or with the health probe below.
+        // Globe.init returns false (and changes nothing) if WebGL is
+        // unavailable; a failed CDN fetch leaves the CSS aurora in place.
+        (function bootGlobe() {
+            const host = document.getElementById('globe');
+            if (!host) return;
+            const load = () => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js';
+                s.async = true;
+                s.onload = () => { try { Globe.init('globe'); } catch (_) { /* decorative */ } };
+                s.onerror = () => { /* no three.js: the CSS background stays */ };
+                document.head.appendChild(s);
+            };
+            const whenIdle = window.requestIdleCallback
+                ? (fn) => requestIdleCallback(fn, { timeout: 3000 })
+                : (fn) => setTimeout(fn, 1200);
+            if (document.readyState === 'complete') whenIdle(load);
+            else window.addEventListener('load', () => whenIdle(load), { once: true });
+        })();
 
         // Show whether the FastAPI backend is reachable, so the demo is honest
         // about whether results come from the server or the browser.
